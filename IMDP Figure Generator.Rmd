@@ -1,29 +1,58 @@
 ---
 title: "IMDP Figure Generator"
 author: "Chris Madsen"
-date: "29/12/2021"
+date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-library(readxl)
-library(ggpubr)
-library(ggrepel)
-library(tidyverse)
-library(sf)
-library(RColorBrewer)
-library(openxlsx)
-library(lubridate)
-library(plotrix)
+pacman::p_load(
+readxl,
+ggpubr,
+ggrepel,
+tidyverse,
+sf,
+RColorBrewer,
+openxlsx,
+lubridate,
+plotrix)
 
 rm(list=ls())
 
+#=====================================================
+#                       OPTIONS 
+#=====================================================
 #Which year should we focus on?
 my.year = 2021
 
+#Update GIS maps? We probably want this turned on unless you are making fine adjustments to some figures.
+update.gis = FALSE
+
 #Are there any stations we would like to exclude from the excel-type figures?
-stations.to.exclude = c("Sched. Insp.","Kaleden","Osoyoos","Other",
-                        "Penticton Roving")
+#In 2021, we will exclude:
+stations.to.include = c("Golden","Radium","Olsen","Yahk",
+                        "Pacific","Osoyoos","Hwy 97c","Mt. Robson",
+                        "Keremeos","Greenwood","Dawson Creek","Kaleden")
+
+stations.to.put.aside = c("Scheduled Inspection","Boat Launch - Okanagan",
+                          "Penticton Roving - Hwy 33", 
+                          "Penticton Roving - Inspection Event")
+
+#Where is the mussel-fouled tracking sheet?
+MusselFouledTracker = "I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/2021 data/Mussel fouled boats tracking sheet 2021-08-20.xlsx"
+
+#What is the sheet name of the destination regions for the mussel fouled tracking sheet?
+MF_tracker_sheet = "DestRegions"
+
+#Where can we find the CBSA notifications excel sheet for this year?
+cbsa_dat = read_excel("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/2021/GIS Maps and Excel Figures/2021 COS inbox notifications.xlsx",
+                 sheet = "Filtered list")
+
+#=====================================================
+#                     END OF OPTIONS
+#=====================================================
 
 #If there is no folder for excel figures for the target year in the I: drive, make it now.
 if(!dir.exists(paste0("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/",my.year,"/GIS Maps and Excel Figures/ExcelFigures"))){
@@ -53,14 +82,14 @@ dat_all = read_excel("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspe
 #Get Station coordinates, might be unnecessary.
 stations = read_sf("W:/CSilverio/2019 Invasive Mussel Program Final Report Maps/Data/Shp_Lyr_Dbase/Figure01_2019_Watercraft_Inspection_Stations.shp") %>% 
   bind_rows(data.frame(Station_Na = c("Balfour","Castlegar","Elko","Midway","Penticton Roving",
-                            "Scheduled Inspection"),
-            Map_label_ = c("Balfour","Castlegar","Elko","Midway","Penticton Roving",""),
-            Lat = c(49.62,49.29,49.30,49.01,49.49,49.49),
-            Lat_geom = c(49.62,49.29,49.30,49.01,49.49,49.49),
-            Long = c(-116.96,-117.64,-115.11,-118.78,-119.59,-119.59),
-            Long_geom = c(-116.96,-117.64,-115.11,-118.78,-119.59,-119.59),
-            HoursOfOpe = rep("Unknown",6),
-            StationTyp = rep("Unknown",6)) %>% 
+                            "Scheduled Inspection","Keremeos"),
+            Map_label_ = c("Balfour","Castlegar","Elko","Midway","Penticton Roving","","Keremeos"),
+            Lat = c(49.62,49.29,49.30,49.01,49.49,49.49,49.20),
+            Lat_geom = c(49.62,49.29,49.30,49.01,49.49,49.49,49.20),
+            Long = c(-116.96,-117.64,-115.11,-118.78,-119.59,-119.59,-119.83),
+            Long_geom = c(-116.96,-117.64,-115.11,-118.78,-119.59,-119.59,-119.83),
+            HoursOfOpe = rep("Unknown",7),
+            StationTyp = rep("Unknown",7)) %>% 
   st_as_sf(coords = c("Long_geom","Lat_geom"),crs=4326)) %>% 
   st_transform(crs = 3005)
 
@@ -80,10 +109,15 @@ dat_all = dat_all %>%
   mutate(Station = case_when(
     Station == "Cascade Border" ~ "Cascade",
     str_detect(Station, "Cutts") ~ "Cutts (Hwy 93)",
-    Station == "Olsen" ~ "Olsen (Hwy 3)",
-    Station == "Pacific" ~ "Pacific / Surrey",
-    str_detect(Station, "^Schedule") ~ "Sched. Insp.",
+    Station == "Hwy 93 Columbia Lake" ~ "Cutts (Hwy 93)",
+    Station == "Olsen (Hwy 3)" ~ "Olsen",
+    Station == "Valemount" ~ "Mt. Robson",
+    str_detect(Station, "Pacific") ~ "Pacific",
+    Station == "Keremeos (Hwy 3)" ~ "Keremeos",
+    str_detect(Station, "^Schedule") ~ "Scheduled Inspection",
     str_detect(Station, "Covid") ~ "COVID Border",
+    str_detect(Station, "Penticton") ~ "Penticton Roving",
+    str_detect(Station, "Okanagan") ~ "Okanagan",
     T ~ Station
   ))
 
@@ -93,8 +127,8 @@ dat_all = dat_all %>%
   rename(Source = Previous_Waterbody_1_Province_Or_State) %>% 
   #Replace NA in Source with previous major city, if we have it. If not, use the province_code of the boat. If we don't have any of those, or if the Source field wasn't blank, keep it as it was.
   mutate(NewSource = case_when(
-    Source == "Unknown" & !is.na(Previous_Major_City) & Previous_Major_City != "None" ~ Previous_Major_City,
-    Source == "Unknown" & (is.na(Previous_Major_City) | Previous_Major_City == "None") ~ Province_Code,
+    (Source == "Unknown" | is.na(Source)) & !is.na(Previous_Major_City) & Previous_Major_City != "None" ~ Previous_Major_City,
+    (Source == "Unknown" | is.na(Source)) & (is.na(Previous_Major_City) | Previous_Major_City == "None") ~ Province_Code,
     T ~ Source)) %>% 
   #If we replaced the Source field with the closest major city, we need to pull the province/state name out of the string.
   mutate(NewSource = case_when(
@@ -103,11 +137,11 @@ dat_all = dat_all %>%
   #Finally, change the long form (e.g. "Alberta") to abbreviated form for names (e.g. "AB").
   left_join(abbrev %>% rename(NewSource = Province_or_State)) %>% 
   mutate(NewSource = coalesce(Abbrev,NewSource)) %>% 
-  select(-Abbrev,-Source) %>% 
+  dplyr::select(-Abbrev,-Source) %>% 
   rename(Previous_Waterbody_1_Province_Or_State = NewSource)
 ```
 
-```{r split_by_year_and_add_cols}
+```{r calculate_total_boats_and_convert_to_datetime}
 #Add total boats (multiply inspections by boat type counters)
 dat_all = dat_all %>% 
   mutate(TotalBoats = as.numeric(Non_Motorized_Counter) + 
@@ -116,88 +150,413 @@ dat_all = dat_all %>%
                       as.numeric(Very_Complex_Counter)) %>% 
   mutate(TotalBoats = replace(TotalBoats, TotalBoats == 0, 1))
 
-#Correct shift start and end times, and raw timestamp.
-
+#Convert start_time, end_time and TimeOfInspection to datetime format.
 dat_all$Start_Time = convertToDateTime(dat_all$Start_Time)
 dat_all$End_Time = convertToDateTime(dat_all$End_Time)
-dat_all$raw_timestamp = convertToDateTime(dat_all$raw_timestamp)
+dat_all$TimeOfInspection = convertToDateTime(dat_all$TimeOfInspection)
 
 dat_all = dat_all %>% 
   mutate(Shift_hours = as.numeric(End_Time - Start_Time)/3600)
+```
 
-#Add an identifier for each shift. I'm using combinations of start and end time
+```{r raw_timestamp_correction}
+# dat_all$Month = month(dat_all$raw_timestamp, abbr = F, label = T)
+# 
+# #Experimental - for any year where metabase is being used (i.e. 2020 and later), find out if the busiest hour on average for each year/month combo is NOT around noon. If that's the case, subtract 7 hours from the raw timestamp to correct it from UTC to PST timezone.
+# #backup = dat_all
+# 
+# for(each.year in unique(dat_all[dat_all$Year>2019,]$Year)){
+# 
+#   #Subset data for year of focus
+#   dat_zoomed = dat_all %>% filter(Year == each.year)
+# 
+#   #Temporarily remove the year of focus from dat_all
+#   dat_all = dat_all %>% filter(Year != each.year)
+# 
+#   #Find busiest hours for each month. If noon is not among the 4 busiest hours, subtract 7 hours from raw_timestamp for that month. Do for all months.
+#   for(each.month in unique(dat_zoomed$Month)){
+#     #Find the 4 busiest hours per month
+#     busiest_hours = dat_zoomed %>%
+#      dplyr::filter(Month == each.month) %>%
+#      mutate(inspection_hour = hour(raw_timestamp)) %>%
+#      count(inspection_hour) %>%
+#      arrange(desc(n)) %>%
+#      slice(1:4) %>%
+#      select(inspection_hour)
+# 
+#      if(!12 %in% busiest_hours$inspection_hour)
+#        {dat_zoomed$raw_timestamp = dat_zoomed$raw_timestamp - 7*3600
+#    }
+#   }
+#   #Add the year of focus' data back into dat_all, now with corrected raw_timestamp.
+#   dat_all = dat_all %>%
+#     bind_rows(dat_zoomed)
+# }
+```
+
+```{r correct_negative_shift_length_data}
+dat_all = dat_all %>% 
+  mutate(Shift_hours = ifelse(Shift_hours < 0, -Shift_hours, Shift_hours))
+
+```
+
+```{r add_shift_unique_identifier}
+#Add a unique identifier for each shift. I'm using combinations of start and end time
 #so hopefully they are unique.
 dat_all = dat_all %>% 
-  #Add a month column.
-  mutate(Month = month(raw_timestamp, abbr = F, label = T)) %>% 
   group_by(Start_Time, End_Time) %>% 
   mutate(Shift_ID = cur_group_id()) %>% 
   select(Year,Shift_ID,everything()) %>% 
   arrange(Shift_ID) %>% 
   ungroup()
-
-dat = dat_all %>% filter(Year == my.year)
 ```
 
-```{r reduce dat_all}
+```{r data_for_maps}
+### Make Data for 2021 GIS maps
+if(update.gis == T){
+#First, we need to get total inspections, HR inspections, and mussel-fouled inspections by source location.
+
+#Source locations...
+na_sf = read_sf("W:/CMadsen/SpatialData/NorthAmerica_ProvState.shp") %>% 
+  filter(!NAME_1 %in% c("Coahuila","Hidalgo"))
+
+#Cleaning up previous waterbody 1 prov/state field...
+source_dat = dat_all %>%
+  rename(ABBR = Previous_Waterbody_1_Province_Or_State) %>% 
+  mutate(ABBR = case_when(
+    ABBR == "unknown" ~ "Unknown",
+    ABBR == "Calgary" ~ "AB",
+    ABBR == "Mexico" ~ "BN",
+    ABBR == "Wi" ~ "WI",
+    ABBR == "Radium" ~ "BC",
+    ABBR == "Sk" ~ "SK",
+    ABBR == "SA" ~ "SK",
+    ABBR == "Ab" ~ "AB",
+    ABBR == "QB" ~ "QC",
+    ABBR == "Yukon Territory" ~ "YT",
+    ABBR == "YK" ~ "YT",
+    ABBR == "Northwest Territories" ~ "NT",
+    ABBR == "NWT" ~ "NT",
+    ABBR == "W" ~ "WA",
+    ABBR == "LI" ~ "LA",
+    ABBR == "KA" ~ "KS",
+    T ~ ABBR
+  )) %>% 
+  filter(Year == my.year)
+
+# source_dat %>% 
+#   count(ABBR, name = "Total") %>%
+#   arrange(desc(Total))
+
+#Join total insp, HR insp, MS insp, and commercially hauled insp, to north america shapefile.
+insp_by_source = na_sf %>% 
+  left_join(source_dat %>% count(ABBR) %>% rename(TotalInsp = n)) %>% 
+  left_join(source_dat %>% 
+              filter(High_Risk_AIS_Ind == T,
+                     Clean_Drain_Dry_After_Inspection_Ind == F) %>% 
+              count(ABBR) %>% 
+              rename(HRInsp = n)) %>% 
+  left_join(source_dat %>% 
+              filter(MusselsFound_Ind == T) %>% 
+              count(ABBR) %>%
+              rename(MFInsp = n)) %>% 
+  left_join(source_dat %>% 
+              filter(Commercially_Hauled_Ind == T) %>% 
+              count(ABBR) %>%
+              rename(CHInsp = n)) %>% 
+  st_centroid()
+  
+
+write_sf(insp_by_source,"W:/CMadsen/2021 Invasive Mussel Program Final Report Maps/data/ShapeLayers/Inspections_by_source_centroid.shp")
+
+# And also to write out inspection data joined to stations.
+stations = read_sf("W:/CMadsen/2021 Invasive Mussel Program Final Report Maps/data/ShapeLayers/Watercraft_Inspection_Stations_Update.shp") %>% 
+  bind_rows(data.frame(Label_name = c("Balfour","Castlegar","Elko","Midway","Penticton Roving","Scheduled Inspection","Salmo","Cutts (Hwy 93)"),
+            Lat = c(49.62,49.29,49.30,49.01,49.49,49,49.19,49.276),
+            Long = c(-116.96,-117.64,-115.11,-118.78,-119.59,-125,-117.28, -115.128),
+            Type = c(rep("Permanent Inspection Station",4),"Roving Inspection Crew",rep("Permanent Inspection Station",3))) %>% 
+              mutate(Lat_c = Lat, Long_c = Long) %>% 
+  st_as_sf(coords = c("Long_c","Lat_c"),crs=4326) %>% 
+  st_transform(crs = 3005))
+
+stations %>% 
+  mutate(Label_name = case_when(
+    Label_name == "Keremeos (Hwy 3)" ~ "Keremeos",
+    Label_name == "Pacific / Surrey" ~ "Pacific",
+    T ~ Label_name
+  )) %>% 
+  filter(Label_name != "Penticton Roving") %>% 
+  rename(Station = Label_name) %>% 
+  left_join(dat_all %>% group_by(Station,Year,Province_Code) %>% count(name = "TotalInspections")) %>%
+  left_join(dat_all %>% group_by(Station,Year,Province_Code) %>% filter(MusselsFound_Ind == T) %>% count(name = "MusselFouled")) %>%
+  left_join(dat_all %>% group_by(Station,Year,Province_Code) %>% filter(High_Risk_AIS_Ind == T) %>% count(name = "HighRisk")) %>%
+  left_join(dat_all %>% group_by(Station,Year,Province_Code) %>% 
+              filter(Province_Code != "Unknown") %>% summarise(number_in_provs = n()) %>% 
+              summarise(number_of_provs = n())) %>% 
+  distinct() %>%
+  group_by(Station,Year) %>% 
+  mutate(row.number = row_number()) %>% 
+  select(Year, everything()) %>% 
+  select(-Province_Code,-row.number) %>% 
+  group_by(Year,Station) %>% 
+  mutate(TotalInspections = sum(TotalInspections, na.rm=T),
+         MusselFouled = sum(MusselFouled, na.rm=T),
+         HighRisk = sum(HighRisk, na.rm=T)) %>% 
+  distinct() %>% 
+  #We're missing a couple rows of coordinates... let's get them.
+  st_transform(crs = 4326) %>% 
+  mutate(Lat = replace_na(Lat, matrix(unlist(st_geometry(geometry)),byrow=T,ncol=2)[,2]),
+         Long = replace_na(Long, matrix(unlist(st_geometry(geometry)),byrow=T,ncol=2)[,1])) %>% 
+  write_sf("W:/CMadsen/2021 Invasive Mussel Program Final Report Maps/data/ShapeLayers/Inspections_Summarised_at_Station_level.shp")
+
+#And also to write out inspections (total, HR, MF) by destination location (i.e. waterbody)
+#Just for 2021!
+#Here are the lake shapefiles for which we have at least 1 inspection from 2015 - present.
+lakes = read_sf("W:/CMadsen/SpatialData/summarized_bc_waterbodies_same_gnis_joined.shp")
+
+summaries = read_excel("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/Multiyear data/InspectionSummaries_GNISNA_WATERSH_Year.xlsx") %>% 
+  filter(Year == my.year)
+  
+lakes = lakes %>% 
+  left_join(summaries) %>% 
+  filter(!is.na(TotalInspections)) %>% 
+  st_centroid()
+
+write_sf(lakes, "W:/CMadsen/2021 Invasive Mussel Program Final Report Maps/data/ShapeLayers/Inspections by dest waterbodies for target year.shp")
+}
+```
+
+```{r add_lat_long_for_closest_city_fields}
+#Combine the two fields containing closest city info: "Destination_Waterbody_1_Closest_City" and "Destination_Major_City".
+dat_all = dat_all %>% 
+  mutate(CityName = case_when(
+    #When we have info for the closest city field, use that.
+    !is.na(Destination_Waterbody_1_Closest_City) & Destination_Waterbody_1_Closest_City != "Other" ~ Destination_Waterbody_1_Closest_City,
+    #If we lack closest city but have info in 'Destination_Major_City' (more coarse detail), use that.
+    is.na(Destination_Waterbody_1_Closest_City) | Destination_Waterbody_1_Closest_City == "Other" ~ Destination_Major_City,
+    T ~ "Unknown"
+  )) %>% 
+  mutate(CityName = replace_na(CityName, "Unknown")) %>% 
+  mutate(CityName = str_remove_all(CityName, ",.*"))
+
+#For inspections that lack a destination waterbody name, use the BC geocoder to get lat/long coordinates for city names. If the dest city is outside BC, don't get lat/long for those, in case there's a tiny town in BC with the same name and we incorrectly get the coordinates for that town. 
+city_names_for_coords = tibble(dat_all %>% 
+             filter(is.na(Destination_Waterbody_1_Name)) %>% 
+             filter(CityName != "Unknown") %>% 
+             #Get rid of any that are outside BC. We'll flag those when we make the DestRegion field.
+             filter(str_detect(Destination_Major_City, ", British Columbia")) %>% 
+             select(CityName) %>% 
+             distinct()) 
+
+#Create new variables that we will fill with the loop below.
+city_names_for_coords$lon = 0
+city_names_for_coords$lat = 0
+  
+#This loop uses the BC geocoder to find the most likely coordinates
+# for each of the unique place names.
+for(i in 1:nrow(city_names_for_coords)){
+    # Pull out place name.
+    my.name = city_names_for_coords[i,]$CityName
+    #Clean up names. Remove anything in brackets.
+    my.name = str_remove_all(my.name, " \\(.*\\)")
+    #Add spaces to names.
+    my.name = str_replace_all(my.name, " ", "%20")
+    
+    url = paste0('https://geocoder.api.gov.bc.ca/addresses.json?addressString=',
+                 my.name,'&maxResults=1&outputSRS=4326')
+    
+    my.coords = jsonlite::fromJSON(url)$features$geometry %>% 
+      summarise(lon = str_extract(coordinates, "(?<=c\\().*(?=\\,)"),
+                lat = str_extract(coordinates, "(?<=\\,).*(?=\\))"))
+    
+    city_names_for_coords[i,]$lon = as.numeric(my.coords$lon)
+    city_names_for_coords[i,]$lat = as.numeric(my.coords$lat)
+}
+
+#Find out which FLRNO region each of these city coords fall into.
+flnro_regions = read_sf("W:/CMadsen/SpatialData/FLNRO_Fishing_Boundaries.shp")
+
+city_names_for_coords = city_names_for_coords %>%
+  st_as_sf(coords = c("lon","lat"), crs = 4326) %>% 
+  st_transform(crs = 3005) %>% 
+  st_join(flnro_regions, st_intersects)
+
+#Join those coordinates to dat_all. For inspections with Unknown nearest city, those remain blank for lat and long.
+dat_all = dat_all %>% 
+  left_join(city_names_for_coords %>% 
+              st_drop_geometry() %>% 
+              rename(City_region_g = REGION_G,
+                     City_region_n = REGION_N))
+```
+
+```{r Subset multiyear dataset for this years data}
 #Set aside the records for mussel-fouled boats.
 dat_mf = dat_all %>% filter(MusselsFound_Ind == T)
 
-#Remove any stations that were flagged at the beginning of this script to be excluded from excel-type figures.
-dat_all = dat_all %>% 
-  filter(!Station %in% stations.to.exclude)
+#And set aside the records for high-risk boats.
+dat_hr = dat_all %>% filter(High_Risk_AIS_Ind == T) %>% 
+  filter(Clean_Drain_Dry_After_Inspection_Ind == F | Year < 2020)
 
-dat = dat %>% 
-  filter(!Station %in% stations.to.exclude)
+#Quick aside: Data Request on 2022-01-19:
+# datrequest_hr = dat_hr %>%
+#   group_by(Year) %>%
+#   summarise(Total = n()) %>%
+#   left_join(dat_hr %>%
+#             filter(Simple_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(Simple = n())) %>%
+#   left_join(dat_hr %>%
+#             filter(Complex_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(Complex = n())) %>%
+#   left_join(dat_hr %>%
+#             filter(Very_Complex_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(VeryComplex = n())) %>%
+#   left_join(dat_hr %>%
+#             filter(Non_Motorized_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(NonMotorized = n())) %>%
+#   mutate(across(-Year, ~replace_na(.x, 0)))
+# 
+# datrequest_mf = dat_mf %>%
+#   group_by(Year) %>%
+#   summarise(Total = n()) %>%
+#   left_join(dat_mf %>%
+#             filter(Simple_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(Simple = n())) %>%
+#   left_join(dat_mf %>%
+#             filter(Complex_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(Complex = n())) %>%
+#   left_join(dat_mf %>%
+#             filter(Very_Complex_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(VeryComplex = n())) %>%
+#   left_join(dat_mf %>%
+#             filter(Non_Motorized_Counter != "0") %>%
+#             group_by(Year) %>%
+#             summarise(NonMotorized = n())) %>%
+#   mutate(across(-Year, ~replace_na(.x, 0)))
+# 
+# datrequest = createWorkbook()
+# addWorksheet(wb = datrequest, sheetName = "HR")
+# addWorksheet(wb = datrequest, sheetName = "MF")
+# 
+# writeDataTable(wb = datrequest, sheet = "HR",x = datrequest_hr, withFilter = T)
+# 
+# writeDataTable(wb = datrequest, sheet = "MF",x = datrequest_mf, withFilter = T)
+# 
+# saveWorkbook(datrequest,
+#              paste0("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/DataRequest_HR_and_MF_boat_types_2022_02_07.xlsx"),overwrite = T)
 
-#Get rid of any rows that have exactly the same raw timestamp. This was chosen as the best method to get rid of duplicate records which showed up in Metabase because of the app glitching and sending multiple entries for the same inspection. BUT if there are mussel fouled boats, keep all of those.
-dat_all = dat_all %>% filter(!duplicated(raw_timestamp))
+#Double check that they are the same HR for 2021.
+# hr_filtered_2021 = read.xlsx("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/2021 data/mussel summary export 2021-10-25_end of season.xlsx", sheet = "High risk filter")
+# 
+# uniqids = unique(hr_filtered_2021$Watercraft.Risk.Assessment.ID)
+# 
+# dat_hr %>%
+#   filter(Year == 2021) %>%
+#   mutate(ids_2021 = as.numeric(str_remove(Watercraft_Risk_Assessment_ID, "2021-"))) %>%
+#   filter(ids_2021 %in% all_of(uniqids))
+# 
+# uniqids[!uniqids %in% all_of(dat_hr %>%
+#   filter(Year == 2021) %>%
+#   mutate(ids_2021 = as.numeric(str_remove(Watercraft_Risk_Assessment_ID, "2021-"))) %>% pull(ids_2021))]
+
+dat = dat_all %>% filter(Year == my.year)
 ```
 
 ```{r sort_into_destination_regions}
 #We also need to pull together the destination waterbody region from a couple columns.
 dat = dat %>% 
-  left_join(dat %>% 
-  #This is just for high-risk or mussel-fouled.
-  filter(High_Risk_AIS_Ind == T | MusselsFound_Ind == T) %>% 
   #Combine the 2 categories of destinations that aren't a waterbody.
   mutate(across(c(DestNotBC,OceanBoat,DryStorage), ~na_if(.x,F))) %>% 
   mutate(Dest_not_wb = coalesce(DestNotBC,DryStorage)) %>% 
   mutate(DestRegion = case_when(
     #If we have the destination name, use that.
     !is.na(Destination_Waterbody_1_Name) ~ Destination_Waterbody_1_Name,
-    #If we don't have name, but have city, use that.
-    is.na(Destination_Waterbody_1_Name) & !is.na(Destination_Waterbody_1_Closest_City) ~ Destination_Waterbody_1_Closest_City,
-    #If we have no name or city, and either of the categories flagged (e.g. "DestnotBC"), use those.
-    is.na(Destination_Waterbody_1_Name) & is.na(Destination_Waterbody_1_Closest_City) & (Dest_not_wb == T) ~ "Dry Storage/Outside BC",
-    T ~ "Unknown")) %>% 
-  select(Watercraft_Risk_Assessment_ID,DestRegion))
+    #If we don't have name, but have city, we'll use the city region we found above.
+    is.na(Destination_Waterbody_1_Name) & !is.na(City_region_n) ~ City_region_n,
+    #If we have no name or city, and either of the categories flagged (e.g. "DestNotBC"), use those.
+    Dest_not_wb == T ~ "Outside BC",
+    DryStorage == T ~ "Dry Storage",
+    T ~ "Unknown"))
 
 #Same thing for our little mussel-fouled table...
 dat_mf = dat_mf %>% 
-  left_join(dat_mf %>% 
   #Combine the 2 categories of destinations that aren't a waterbody.
   mutate(across(c(DestNotBC,OceanBoat,DryStorage), ~na_if(.x,F))) %>% 
   mutate(Dest_not_wb = coalesce(DestNotBC,DryStorage)) %>% 
   mutate(DestRegion = case_when(
     #If we have the destination name, use that.
     !is.na(Destination_Waterbody_1_Name) ~ Destination_Waterbody_1_Name,
-    #If we don't have name, but have city, use that.
-    is.na(Destination_Waterbody_1_Name) & !is.na(Destination_Waterbody_1_Closest_City) ~ Destination_Waterbody_1_Closest_City,
-    #If we have no name or city, and either of the categories flagged (e.g. "DestnotBC"), use those.
-    is.na(Destination_Waterbody_1_Name) & is.na(Destination_Waterbody_1_Closest_City) & (Dest_not_wb == T) ~ "Dry Storage/Outside BC",
-    T ~ "Unknown")) %>% 
-  select(Watercraft_Risk_Assessment_ID,DestRegion))
+    #If we don't have name, but have city, we'll use the city region we found above.
+    is.na(Destination_Waterbody_1_Name) & !is.na(City_region_n) ~ City_region_n,
+    #If we have no name or city, and either of the categories flagged (e.g. "DestNotBC"), use those.
+    Dest_not_wb == T ~ "Outside BC",
+    DryStorage == T ~ "Dry Storage",
+    T ~ "Unknown"))
+
+#And same thing for high-risk inspections.
+#Same thing for our little mussel-fouled table...
+dat_hr = dat_hr %>% 
+  #left_join(dat_hr %>% 
+  #Combine the 2 categories of destinations that aren't a waterbody.
+  mutate(across(c(DestNotBC,OceanBoat,DryStorage), ~na_if(.x,F))) %>% 
+  mutate(Dest_not_wb = coalesce(DestNotBC,DryStorage)) %>% 
+  mutate(DestRegion = case_when(
+    #If we have the destination name, use that.
+    !is.na(Destination_Waterbody_1_Name) ~ Destination_Waterbody_1_Name,
+    #If we don't have name, but have city, we'll use the city region we found above.
+    is.na(Destination_Waterbody_1_Name) & !is.na(City_region_n) ~ City_region_n,
+    #If we have no name or city, and either of the categories flagged (e.g. "DestNotBC"), use those.
+    Dest_not_wb == T ~ "Outside BC",
+    DryStorage == T ~ "Dry Storage",
+    T ~ "Unknown"))
+
+ #select(Watercraft_Risk_Assessment_ID,DestRegion))
+```
+
+```{r temporary_section_write_out_stations_with_few_insp}
+# few_insp_workbook = createWorkbook()
+# addWorksheet(wb = few_insp_workbook, sheetName = "PentRoving")
+# addWorksheet(wb = few_insp_workbook, sheetName = "Kaleden")
+# addWorksheet(wb = few_insp_workbook, sheetName = "Other")
+# 
+# writeDataTable(wb = few_insp_workbook, sheet = "PentRoving", x = dat %>% filter(Station == "Penticton Roving"),withFilter = T)
+# 
+# writeDataTable(wb = few_insp_workbook, sheet = "Kaleden",x = dat %>% filter(Station == "Kaleden"),withFilter = T)
+# 
+# writeDataTable(wb = few_insp_workbook, sheet = "Other",x = dat %>% filter(Station == "Other"),withFilter = T)
+# 
+# saveWorkbook(few_insp_workbook, 
+#              paste0("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/2021 data/Transient stations with few inspections.xlsx"),overwrite = T)
+```
+
+```{r reduce dat_all, dat}
+#Set aside four stations that Martina asked for a single excel sheet for.
+dat_rovers = dat %>% filter(Station %in% stations.to.put.aside)
+dat_all_rovers = dat_all %>% filter(Station %in% stations.to.put.aside)
+
+#Remove any stations that were flagged at the beginning of this script to be excluded from excel-type figures.
+#dat = dat %>% filter(Station %in% stations.to.include)
+#dat_all = dat_all %>% filter(Station %in% stations.to.include)
+
+#Get rid of any rows that have exactly the same raw timestamp. This was chosen as the best method to get rid of duplicate records which showed up in Metabase because of the app glitching and sending multiple entries for the same inspection. BUT if there are mussel fouled boats, keep all of those.
+# dat_all = dat_all %>% filter(!duplicated(raw_timestamp)) 
 ```
 
 ### Figure 3 Total Boats by Station
-This figure months from `r as.character(min(dat$Month))` to `r as.character(max(dat$Month))`
+
 ```{r fig3_total_boats_by_station}
 p3 = dat %>% 
+  filter(!Station %in% c("Scheduled Inspection","Other","Okanagan","Penticton Roving")) %>% 
   group_by(Station) %>% 
   summarise(NumberInsp = n()) %>% 
-  left_join(dat %>% 
-              filter(High_Risk_AIS_Ind == T) %>% 
+  left_join(dat_hr %>% 
+              filter(Year == my.year) %>% 
               group_by(Station) %>% 
               summarise(NumberHighRiskInsp = n())
             ) %>% 
@@ -213,9 +572,17 @@ p3 = dat %>%
   filter(Shift_hours > 0) %>% 
   summarise(TotalHours = sum(Shift_hours)))  %>% 
   mutate(EncounterFreq = NumberInsp/TotalHours) %>% 
+  #Kaleden has no total hours for inspections... remove for now.
+  #filter(!is.na(TotalHours)) %>% 
+  arrange(desc(EncounterFreq)) %>% 
   mutate(Station = factor(Station)) %>% 
+  mutate(Station = fct_inorder(Station)) %>% 
+  mutate(StationType = case_when(
+    Station %in% c("Hwy 97C","Keremeos","Greenwood","Kaleden") ~ "Roving",
+    T ~ "Permanent"
+  )) %>% 
   ggplot() + 
-  geom_col(aes(x=Station,y=EncounterFreq),fill = "#5f6a6f", width = 0.40) +
+  geom_col(aes(x=Station,y=EncounterFreq, fill = StationType), width = 0.40) +
   geom_line(aes(x=Station,y=PercentHR,group=1),col="red",size=2) +
   scale_y_continuous(name = "Encounter Frequency",
                      sec.axis = sec_axis(~., name = "% High Risk",
@@ -223,7 +590,7 @@ p3 = dat %>%
   # geom_text(aes(x=Station,y=EncounterFreq+max(EncounterFreq)*0.05,
   #               label=round(EncounterFreq,0))) +
   theme_classic() +
-  labs(x = "", y = "Encounter Frequency") +
+  labs(x = "", y = "Encounter Frequency", fill = "Station Type") +
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
 
 p3
@@ -231,10 +598,120 @@ p3
 ggsave("Fig3_EncounterFrequency_HR.jpg",p3)
 ```
 
+
+```{r figures_for_StoryMaps_2021, fig.width=8, fig.height = 4}
+# OverallFindings = tibble(Year = c(2015:my.year),
+#        `Total Watercraft Inspected` = c(4350,24500,35000,40700,52000,29900,
+#                                     as.numeric(dat %>% summarise(n()) + dat_rovers %>% summarise(n()))),
+#        `High-Risk Inspections` = c(70,685,2071,1652,1290,158,
+#                                as.numeric(dat_hr %>% filter(Year == my.year) %>% summarise(n()))),
+#        `Mussel-Fouled Boats` = c(15,17,25,25,22,16,
+#                              as.numeric(dat_mf %>% filter(Year == my.year) %>% summarise(n())))) %>% 
+#   pivot_longer(-Year) %>% 
+#   mutate(name = factor(name, levels = c("Total Watercraft Inspected",
+#                                         "High-Risk Inspections",
+#                                         "Mussel-Fouled Boats")))
+# 
+# OverallFindingsPlot = plotly::ggplotly(
+#   ggplot() + 
+#   geom_col(data = OverallFindings %>% 
+#              rename(`Number of Inspection` = value,
+#                     `Inspection Type` = name), 
+#            aes(x = Year, 
+#                y = `Number of Inspection`, 
+#                fill = `Inspection Type`)) +
+#   facet_wrap(~ `Inspection Type`, scales = "free", nrow = 1, ncol = 3) + 
+#   # geom_text(data = OverallFindings %>% 
+#   #             mutate(value_lab = case_when(
+#   #               value >= 1000 ~ paste0("~",round(value, -3)),
+#   #               T ~ as.character(value))) %>% 
+#   #             mutate(value_lab = str_replace(value_lab, "000$", "K")),
+#   #           aes(x = Year, y = value/2,
+#   #               label = value_lab),
+#   #           size = 3) +
+#   theme_classic() + 
+#   scale_x_continuous(breaks = 2015:my.year) +
+#   scale_fill_brewer(palette = "Dark2") +
+#   theme(legend.position = "none",
+#         axis.text.x = element_text(angle = 45, vjust = .5)) + 
+#   labs(fill = "Inspection Type", y = "Number of Inspections")
+#   )
+
+#ggsave("C:/Users/CMADSEN/Downloads/LocalRWork/output/OverallFindingsPlot_MusselStoryMap.jpg",OverallFindingsPlot, height = 4, width = 8)
+```
+
+
+```{r fig3c_total_boats_by_station_excluded_stations}
+### Figure 3b. Low-risk and High-risk Boats by Station for only 4 Excluded Stations
+#Scheduled Inspections, Boat Launch - Okanangan, Penticton Roving - Hwy 33, and #Penticton Roving - Inspection Event.
+
+# p3b = dat_rovers %>% 
+#   filter(High_Risk_AIS_Ind == F) %>% 
+#   group_by(Station) %>% 
+#   summarise(LowRisk = n()) %>% 
+#   left_join(dat_hr %>% 
+#               filter(Year == my.year) %>% 
+#               group_by(Station) %>% 
+#               summarise(HighRisk = n())
+#             ) %>% 
+#   #For any stations with 0 HR inspections, replace NA with 0.
+#   mutate(HighRisk = replace_na(HighRisk, 0)) %>% 
+#   mutate(Station = factor(Station)) %>% 
+#   add_row(Station = "Penticton Roving - Inspection Event",
+#           LowRisk = 0, HighRisk = 0) %>% 
+#   rename(`Low-Risk Inspections` = LowRisk,
+#          `High-Risk Inspections` = HighRisk) %>% 
+#   pivot_longer(cols = c(`Low-Risk Inspections`,`High-Risk Inspections`)) %>% 
+#   ggplot() + 
+#   geom_col(aes(x=Station,y=value,fill=name), width = 0.40, position = position_dodge()) +
+#   theme_classic() +
+#   # geom_text(aes(x=the.month,y=TotalEffort+max(TotalEffort)*0.05,
+#   #               label=round(TotalEffort,0))) +
+#   scale_fill_manual(values = c("Low-Risk Inspections" = "#5f6a6f",
+#                                "High-Risk Inspections" = "red")) +
+#   labs(x = "", y = "Number of Inspections", fill = "Inspection Type") +
+#   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
+# 
+# p3b
+# 
+# ggsave("Fig3b_Low_and_High_Risk_for_Excluded_Stations.jpg",p3b)
+```
+
+### Figure 3.x Total Inspections by Station
+
+```{r}
+p3.x = dat_all %>% 
+  filter(Year %in% c(2019:2021)) %>% 
+  filter(Station %in% c("Golden","Yahk","Olsen",
+                        "Radium","Mt. Robson","Osoyoos",
+                        "Dawson Creek",
+                        "Pacific")) %>% 
+  group_by(Year, Station) %>% 
+  summarise(NumberInsp = n()) %>% 
+  group_by(Station) %>% 
+  mutate(TotalInsp = sum(NumberInsp)) %>% 
+  ungroup() %>% 
+  arrange(desc(TotalInsp),desc(NumberInsp)) %>% 
+  mutate(Station = fct_inorder(Station)) %>% 
+  ggplot() + 
+  geom_col(aes(x=Station,y=NumberInsp,fill=Year), width = 0.40,position=position_dodge(preserve = "single")) +
+  scale_y_continuous(name = "Number of Inspections",
+                     breaks = c(0,1000,2500,5000,7500,10000,15000)) +
+  theme_classic() +
+  labs(x = "") +
+  theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1)) + 
+  scale_fill_brewer(palette = "Dark2")
+
+p3.x
+
+ggsave("Fig3x_TotalInspections_2019_to_2021_All_Stations.jpg",p3.x)
+```
+
 ### Figure 4 Total Number of Jurisdictions
 
 ```{r fig4_total_number_jurisdictions}
-p4 = dat %>% 
+p4 = dat %>%
+  filter(!Station %in% c("Scheduled Inspection","Other")) %>% 
   group_by(Station,Previous_Waterbody_1_Province_Or_State) %>% 
   summarise(Different_Sources = n()) %>% 
   summarise(TotalSources = n()) %>% 
@@ -256,7 +733,7 @@ ggsave("Fig4_Total_Jurisdictions_by_Station.jpg",p4)
 
 ```{r fig5_total_inspections_and_total_effort_by_month}
 p5 = ggarrange(dat %>% 
-  mutate(the.month = month(Start_Time,label=T,abbr=F)) %>% 
+  mutate(the.month = month(TimeOfInspection,label=T,abbr=F)) %>% 
   #Calculate the number of inspections for each month
   group_by(the.month) %>% 
   summarise(Number_Insp = n()) %>% 
@@ -267,8 +744,9 @@ p5 = ggarrange(dat %>%
   theme_classic() +
   labs(x = "", y = "Watercraft Encounters (# of inspections)") +
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1)),
-                dat %>% 
-  mutate(the.month = month(Start_Time,label=T,abbr=F)) %>% 
+  
+  dat %>% 
+  mutate(the.month = month(TimeOfInspection,label=T,abbr=F)) %>% 
   group_by(the.month) %>% 
   select(the.month,Shift_ID,Shift_hours) %>% 
   distinct() %>% 
@@ -293,15 +771,17 @@ ggsave("Fig5_NumberInspections_and_TotalEffort_month.jpg",p5)
 
 ```{r fig6_EncounterFrequency_by_month}
 p6 = dat %>% 
-  mutate(the.month = month(Start_Time,label=T,abbr=F)) %>% 
+  mutate(the.month = month(TimeOfInspection,label=T,abbr=F)) %>% 
+  mutate(the.day = day(TimeOfInspection)) %>% 
   #Calculate the number of inspections for each month
-  group_by(the.month) %>% 
+  group_by(the.month,the.day) %>% 
   summarise(Number_Insp = n()) %>% 
   left_join(
-    dat %>% 
-  mutate(the.month = month(Start_Time,label=T,abbr=F)) %>% 
-  group_by(the.month) %>% 
-  select(the.month,Shift_ID,Shift_hours) %>% 
+  dat %>% 
+  mutate(the.month = month(TimeOfInspection,label=T,abbr=F)) %>% 
+  mutate(the.day = day(TimeOfInspection)) %>% 
+  group_by(the.month,the.day) %>% 
+  select(the.month,the.day,Shift_ID,Shift_hours) %>% 
   distinct() %>% 
   #Some shifts report negative # of hours... remove those.
   filter(Shift_hours > 0) %>% 
@@ -309,9 +789,12 @@ p6 = dat %>%
   ) %>% 
   mutate(EncounterFreq = Number_Insp/TotalEffort) %>%
   mutate(StandardError = plotrix::std.error(EncounterFreq)) %>% 
+  #Summarise for each month
+  group_by(the.month,StandardError) %>% 
+  summarise(EncounterFreq = mean(EncounterFreq)) %>% 
   #If the bottom half of the errorbar would be below 0, change to 0.
   mutate(StandardError = case_when(
-    EncounterFreq - StandardError <= 0 ~ -EncounterFreq,
+    EncounterFreq - StandardError <= 0 ~ EncounterFreq,
     T ~ StandardError
   )) %>% 
   ggplot() + 
@@ -335,7 +818,7 @@ ggsave("Fig6_EncounterFrequency_by_month.jpg",p6)
 
 ```{r fig7_total_inspections_and_total_effort_by_day_of_week}
 p7 = ggarrange(dat %>% 
-  mutate(the.day = wday(Start_Time,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
+  mutate(the.day = wday(TimeOfInspection,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
   #Calculate the number of inspections for each month
   group_by(the.day) %>% 
   summarise(Number_Insp = n()) %>% 
@@ -347,7 +830,7 @@ p7 = ggarrange(dat %>%
   labs(x = "", y = "Watercraft Encounters (# of inspections)") +
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1)),
                 dat %>% 
-  mutate(the.day = wday(Start_Time,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
+  mutate(the.day = wday(TimeOfInspection,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
   group_by(the.day) %>% 
   select(the.day,Shift_ID,Shift_hours) %>% 
   distinct() %>% 
@@ -371,23 +854,32 @@ ggsave("Fig7_NumberInspections_and_TotalEffort_day.jpg",p7)
 ### Fig 8 Encounter Frequency by day of week
 
 ```{r fig8_Encounter_Frequency_by_day_of_week}
+#This one requires grouping the data by the week number in the year (i.e. 1,2, 3 ... up to 54) and the day of the week to first calculate the standard error within each day of the week (which is the eventual grouping factor for the figure), then summarise by day of the week the calculate mean frequency.
 p8 = dat %>% 
-  mutate(the.day = wday(Start_Time,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
+  mutate(the.day = wday(TimeOfInspection,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
+  mutate(the.week = week(TimeOfInspection),
+         Month = month(TimeOfInspection)) %>% 
   #Calculate the number of inspections for each month
-  group_by(the.day) %>% 
+  group_by(Month,the.week,the.day) %>% 
   summarise(Number_Insp = n()) %>% 
   left_join(
     dat %>% 
-  mutate(the.day = wday(Start_Time,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
-  group_by(the.day) %>% 
-  select(the.day,Shift_ID,Shift_hours) %>% 
+  mutate(the.day = wday(TimeOfInspection,label=T,abbr=F,week_start = getOption("lubridate.week.start", 1))) %>% 
+  mutate(the.week = week(TimeOfInspection),
+         Month = month(TimeOfInspection)) %>% 
+  group_by(Month,the.week,the.day) %>% 
+  select(Month,the.week,the.day,Shift_ID,Shift_hours) %>% 
   distinct() %>% 
   #Some shifts report negative # of hours... remove those.
   filter(Shift_hours > 0) %>% 
   summarise(TotalEffort = sum(Shift_hours))
   ) %>% 
   mutate(EncounterFreq = Number_Insp/TotalEffort) %>%
+  group_by(the.day) %>% 
   mutate(StandardError = plotrix::std.error(EncounterFreq)) %>% 
+  mutate(EncounterFreq = mean(EncounterFreq,na.rm=T)) %>% 
+  select(the.day,EncounterFreq,StandardError) %>% 
+  distinct() %>% 
   ggplot() + 
   geom_col(aes(x=the.day,y=EncounterFreq),fill = "#5f6a6f",width = 0.40) +
   geom_errorbar(aes(x=the.day,
@@ -407,25 +899,9 @@ ggsave("Fig8_EncounterFrequency_day_of_week.jpg",p8)
 
 ### Figure 9 Total Inspections by Time of Day
 
-In 2021, there were some errors in the inspection app that resulted in very odd shift start and end times: many shifts were recorded as beginning at 3 AM when they actually began at 8 AM, and other such issues. Unfortunately, no easy fix was available as this did not affect all stations in the same way. On Metabase, I tried to add 7 hours to the Shift start and end times fields for Golden, Radium, Mt. Robson and Olsen (Hwy 3) records, and 6 hours to all other stations. However, here we use the raw timestamp field to access the time of inspection and its errors are less predictable... I have done no data transformation at this time.
-
 ```{r fig9_total_inspections_by_time_of_day}
 p9 = dat %>% 
-  mutate(the.hour = hour(raw_timestamp)) %>%
-  # mutate(the.hour = case_when(
-  #   the.hour <= 6 ~ the.hour + 14,
-  #   the.hour > 6 ~ the.hour - 7
-  # )) %>% 
-  #For 2021, we have some strange times recorded in the raw_timestamp field.
-  #I attempt to correct them for records stating a raw_timestamp of midnight to 6 am by adding 7 hours to records from Golden, Radium, Mt. Robson, and Olsen (Hwy 3), and adding 6 hours to all other stations.
-  # mutate(the.hour = case_when(
-  #   Year == 2021 & the.hour %in% c(0:12) & Station %in% c("Golden","Radium",
-  #                                         "Mt. Robson","Olsen (Hwy 3)") ~ the.hour+7,
-  #   Year == 2021 & the.hour %in% c(0:12) & !Station %in% c("Golden","Radium",
-  #                                         "Mt. Robson","Olsen (Hwy 3)") ~ the.hour+6,
-  #   T ~ as.double(the.hour)
-  # )) %>% 
-  #Calculate the number of inspections for each month
+  mutate(the.hour = hour(TimeOfInspection)) %>%
   group_by(the.hour) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
@@ -440,6 +916,74 @@ p9 = dat %>%
 p9
 
 ggsave("Fig9_NumberInspections_hour_of_day.jpg",p9)
+```
+
+### Figure 9. Part 2 High-Risk Inspections by Time of Day
+
+```{r fig9_HR_inspections_by_time_of_day}
+p9.2 = dat %>% 
+  filter(High_Risk_AIS_Ind == T) %>% 
+  mutate(the.hour = hour(TimeOfInspection)) %>%
+  group_by(the.hour) %>% 
+  summarise(Number_Insp = n()) %>% 
+  ggplot() + 
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+           width = 0.40) +
+  geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
+                label=round(Number_Insp,0))) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0,23,1)) +
+  labs(x = "", y = "Watercraft Encounters (# of inspections)")
+
+p9.2
+
+ggsave("Fig9_Part2_Number_Highrisk_Inspections_hour_of_day.jpg",p9.2)
+```
+
+### Figure 9. Part 3 Total Inspections by Time of Day for Golden Station
+
+```{r fig9_Golden_inspections_by_time_of_day}
+p9.3 = dat %>% 
+  filter(Station == "Golden") %>% 
+  mutate(the.hour = hour(TimeOfInspection)) %>%
+  group_by(the.hour) %>% 
+  summarise(Number_Insp = n()) %>% 
+  ggplot() + 
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+           width = 0.40) +
+  geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
+                label=round(Number_Insp,0))) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0,23,1)) +
+  labs(x = "", y = "Watercraft Encounters (# of inspections)")
+
+p9.3
+
+ggsave("Fig9_Part3_Number_Inspections_Golden_hour_of_day.jpg",p9.3)
+```
+
+
+### Figure 9. Part 4 High-Risk Inspections by Time of Day for Golden Station
+
+```{r fig9_HR_Golden_inspections_by_time_of_day}
+p9.4 = dat %>% 
+  filter(High_Risk_AIS_Ind == T,
+         Station == "Golden") %>% 
+  mutate(the.hour = hour(TimeOfInspection)) %>%
+  group_by(the.hour) %>% 
+  summarise(Number_Insp = n()) %>% 
+  ggplot() + 
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+           width = 0.40) +
+  geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
+                label=round(Number_Insp,0))) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0,23,1)) +
+  labs(x = "", y = "Watercraft Encounters (# of inspections)")
+
+p9.4
+
+ggsave("Fig9_Part4_Number_Highrisk_Inspections_Golden_hour_of_day.jpg",p9.4)
 ```
 
 ### Figure 11 Destination Waterbodies with Percent
@@ -473,6 +1017,8 @@ ggsave("Fig11_DestinationWaterbody_Percent_Inspections.jpg",p11)
 
 ```{r fig12_percent_compliance_by_station}
 p12 = dat %>% 
+  filter(!Station %in% c("Scheduled Inspection",
+                         "Other")) %>% 
   group_by(Station,Shift_ID) %>% 
   summarise(NumberInsp = n()) %>% 
   #Add number of non-motorized blow-bys per unique station / shift combo.
@@ -515,6 +1061,11 @@ ggsave("Fig12_PercentCompliance_Station.jpg",p12)
 ### Figure 13 Noncompliant Watercraft Breakdown
 ```{r fig13_noncompliant_breakdown}
 p13 = dat %>% 
+  filter(!Station %in% c("Scheduled Inspection",
+                         "Penticton Roving",
+                         "Okanagan",
+                         "Osoyoos",
+                         "Other")) %>% 
   group_by(Station,Shift_ID) %>% 
   mutate(nonm = as.numeric(Non_Motorized_Blow_Bys_Counter)) %>% 
   select(Station,Shift_ID,nonm) %>% 
@@ -560,6 +1111,9 @@ ggsave("Fig13_Percent_Blowbys_Station.jpg",p13)
 
 ```{r fig14_percent_watercraft_insp_with_prev_insp}
 p14 = dat %>% 
+  filter(!Station %in% c("Scheduled Inspection",
+                         "Okanagan",
+                         "Other")) %>% 
   group_by(Station) %>% 
   summarise(TotalInsp = n()) %>% 
   left_join(dat %>% 
@@ -593,6 +1147,8 @@ ggsave("Fig14_Percent_Intercepted_with_Prev_Insp.jpg",p14)
 
 ```{r fig15_prev_insp_watercraft_insp_time}
 p15 = dat %>% 
+  filter(!Station %in% c("Scheduled Inspection",
+                         "Other")) %>% 
   ungroup() %>% 
   filter(Previous_Inspection_Ind == T) %>% 
   filter(!is.na(Previous_Inspection_Days_Count)) %>% 
@@ -638,14 +1194,13 @@ p15
 ggsave("Fig15_Percent_PreviouslyInspected_Date_Bins.jpg",p15)
 ```
 
-### Total High-risk Inspections over 3 years
+### Figure 16 Total High-risk Inspections over 3 years
 
 ```{r fig16_total_HR_insp_3_years}
-p16 = dat_all %>% 
+p16 = dat_hr %>% 
   #Filter for our target year and the 2 years prior
   filter(Year %in% c(my.year-2, my.year-1, my.year)) %>% 
-  filter(High_Risk_AIS_Ind == T) %>% 
-  mutate(the.month = month(raw_timestamp,label=T,abbr=F)) %>% 
+  mutate(the.month = month(TimeOfInspection,label=T,abbr=F)) %>% 
   group_by(Year,the.month) %>% 
   summarise(Number_HR = n()) %>% 
   ungroup() %>% 
@@ -662,7 +1217,7 @@ p16 = dat_all %>%
            position = "dodge") +
   geom_text(data = . %>% filter(Year == my.year),
             aes(x=the.month,
-                y=Number_HR+max(Number_HR)*0.15,
+                y=Number_HR+max(Number_HR)*0.2,
                label=round(Number_HR,0)),
                nudge_x = 0.15) +
   theme_classic() +
@@ -677,8 +1232,8 @@ ggsave("Fig16_Total_HR_Inspections_3_year_spread.jpg",p16)
 ### Figure 18 Source Locations of High-Risk Inspections
 
 ```{r fig18_pie_chart_source_locations_HR_Insp}
-fig18_dat = dat %>% 
-  filter(High_Risk_AIS_Ind == T) %>% 
+fig18_dat = dat_hr %>% 
+  filter(Year == my.year) %>% 
   group_by(Previous_Waterbody_1_Province_Or_State) %>% 
   summarise(BoatsFromPlace = n()) %>% 
   mutate(TotalBoats = sum(BoatsFromPlace)) %>% 
@@ -716,19 +1271,19 @@ p18 = ggarrange(ggplot(fig18_main_dat,
            fill = Previous_Waterbody_1_Province_Or_State)) +
   geom_bar(width = 1, stat = "identity", color = "white") +
   coord_polar("y", start = 0) +
-  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(Previous_Waterbody_1_Province_Or_State,"\n",round(prop,1))),
+  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(Previous_Waterbody_1_Province_Or_State,"\n",round(prop,1),"%")),
                    color = "black", nudge_x = 1.5) + 
   theme_void() + 
   scale_fill_brewer(palette = "Dark2") + 
   labs(fill = "Source") + 
-  ggtitle("Principle Sources") +
+  ggtitle("Main Sources") +
   theme(legend.position = "none"),
 ggplot(fig18_second_dat,
        aes(x = "", y = prop, 
            fill = Previous_Waterbody_1_Province_Or_State)) +
   geom_bar(width = 1, stat = "identity", color = "white") +
   coord_polar("y", start = 0)+
-  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(Previous_Waterbody_1_Province_Or_State,"\n",round(prop,1))), color = "black",nudge_x = 0.7)+
+  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(Previous_Waterbody_1_Province_Or_State,"\n",round(prop,1),"%")), color = "black",nudge_x = 0.7)+
   theme_void() + 
   labs(fill = "Source") + 
   ggtitle("Breakdown of `Other`") +
@@ -740,15 +1295,56 @@ p18
 ggsave("Fig18_Inspection_Source_Pie_Charts.jpg",p18)
 ```
 
-### Figure 19 Source Locations of High-Risk Inspections
+### Figure 19 Destination Locations of High-Risk Inspections
 
 ```{r fig19_pie_chart_destination_locations_HR_Insp}
-fig19_dat = dat %>% 
-  filter(High_Risk_AIS_Ind == T) %>% 
-  #Homogenize any entries that mention "Ocean" into the same group.
-  mutate(DestRegion = replace(DestRegion,
-                              str_detect(DestRegion,"Ocean"),
-                              "Pacific Ocean")) %>% 
+#Quick aside - Martina wants to know how many of the HR inspections that have "Unknown" recorded in the DestRegion field also have the Source_wb_prov_unknown field toggled as T.
+
+# dat_hr %>%
+#     filter(Year == my.year) %>%
+#     filter(DestRegion %in% c("unknown","Unknown")) %>%
+#     #filter(Destination_Major_City != "None") %>%
+#     filter(Unknown_Destination_Waterbody_Ind == T) %>%
+#     select(Destination_Waterbody_1_Name,
+#            Destination_Waterbody_1_Closest_City,
+#            Destination_Major_City,
+#            Unknown_Destination_Waterbody_Ind,
+#            General_Comment) %>%
+#   View(.)
+# 
+# #Total number of HR 2021 records for which destination region is Unknown.
+# dat_hr %>%
+#   filter(Year == my.year) %>%
+#   filter(DestRegion %in% c("unknown","Unknown")) %>%
+#   summarise(Unknown_DestRegion = n())
+# 
+# #Subset of above: where destination major city is also unknown.
+# dat_hr %>%
+#     filter(Year == my.year) %>%
+#     filter(DestRegion %in% c("unknown","Unknown")) %>%
+#     filter(Destination_Major_City != "None") %>%
+#   summarise(Unknown_DestRegion = n())
+# 
+# #Subset of above: where unknown destination waterbody indicator field is TRUE.
+# dat_hr %>%
+#   filter(Year == my.year) %>%
+#   filter(DestRegion %in% c("unknown","Unknown")) %>%
+#   filter(Unknown_Destination_Waterbody_Ind == T) %>%
+#   summarise(n())
+
+fig19_dat = dat_hr %>% 
+  filter(Year == my.year) %>% 
+#Clean up destination regions.
+  mutate(DestRegion = case_when(
+    str_detect(DestRegion, "Ocean") ~ "Pacific Ocean",
+    str_detect(General_Comment, "going to Vancouver") ~ "Lower Mainland",
+    str_detect(General_Comment, "to Pacific Ocean") ~ "Pacific Ocean",
+    str_detect(General_Comment, "Kelowna") ~ "Okanagan",
+    str_detect(General_Comment, "Alaska") ~ "Outside BC",
+    str_detect(General_Comment, "Vancouver Island") ~ "Vancouver Island",
+    str_detect(General_Comment, "risk of entering BC waters") ~ "Outside BC",
+    T ~ DestRegion
+  )) %>% 
   group_by(DestRegion) %>% 
   summarise(BoatsFromPlace = n()) %>% 
   mutate(TotalBoats = sum(BoatsFromPlace)) %>% 
@@ -762,7 +1358,7 @@ fig19_dat = dat %>%
               arrange(DestRegion,REGION_G) %>% 
               group_by(DestRegion) %>% 
               slice(1)) %>% 
-#Any holes in this lookup table should be filled with DestRegion values.
+#Any holes in this lookup table (e.g. cities) should be filled with DestRegion values.
   mutate(REGION_N = case_when(
          is.na(REGION_N) ~ DestRegion,
          T ~ REGION_N)) %>% 
@@ -778,17 +1374,57 @@ fig19_main_dat = fig19_dat %>%
   arrange(desc(REGION_N)) %>% 
   mutate(lab.ypos = cumsum(prop) - 0.5*prop)
 
+#Make colour palette that has 9 colours!
+dark_pal_9 = brewer.pal(9, name = "Dark2") %>% str_replace("#666666","#d63735")
+
+dark_pal_9 = c(
+  `a` = "#1B9E77",
+  `b` = "#D95F02",
+  `c` = "#7570B3",
+  `d` = "#E7298A",
+  `e` = "#66A61E",
+  `f` = "#E6AB02",
+  `g` = "#A6761D",
+  `h` = "#d63735",
+  `i` = "#2999d2")
+
+darkpal_9_cols <- function(...) {
+  cols <- c(...)
+  if (is.null(cols))
+    return (dark_pal_9)
+  dark_pal_9[cols]
+}
+
+darkpal_9_cols()
+
+darkpal_9_palette = list("main" = darkpal_9_cols("a","b","c","d","e","f","g","h","i"))
+
+darkpal_9_function <- function(palette = "main", reverse = FALSE, ...) {
+  pal <- darkpal_9_palette[[palette]]
+  if (reverse) pal <- rev(pal)
+  colorRampPalette(pal, ...)
+}
+
+scale_fill_darkpal9 <- function(palette = "main", discrete = TRUE, reverse = FALSE, ...) {
+  pal <- darkpal_9_function(palette = palette, reverse = reverse)
+  if (discrete) {
+    discrete_scale("fill", paste0("darkpal_9_", palette), palette = pal, ...)
+  } else {
+    scale_fill_gradientn(colours = pal(256), ...)
+  }
+}
+
 p19 = ggarrange(
   ggplot(fig19_main_dat,
        aes(x = "", y = prop, 
            fill = REGION_N)) +
   geom_bar(width = 1, stat = "identity", color = "white") +
   coord_polar("y", start = 0)+
-  geom_text_repel(aes(y = lab.ypos, x = 1, label = paste0(REGION_N,"\n",round(prop,1))), color = "black",nudge_x=0.7,force=20)+
+  geom_text_repel(aes(y = lab.ypos, x = 1, label = paste0(REGION_N,"\n",round(prop,1),"%")), color = "black",nudge_x=0.7,force=20)+
   theme_void() + 
   theme(legend.position = "none") +
   ggtitle("Main Destination Regions") +
-  scale_fill_brewer(palette = "Dark2") + 
+  scale_fill_darkpal9() + 
   labs(fill = "Destination Region"),
   
   ggplot(fig19_dat %>% 
@@ -799,7 +1435,7 @@ p19 = ggarrange(
            fill = REGION_N)) +
   geom_bar(width = 1, stat = "identity", color = "white") +
   coord_polar("y", start = 0)+
-  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(REGION_N,"\n",round(prop,1))), color = "black",nudge_x=0.7)+
+  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(REGION_N,"\n",round(prop,1),"%")), color = "black",nudge_x=0.7)+
   theme_void() + 
   theme(legend.position = "none") +
   ggtitle("Breakdown of `Other`") +
@@ -849,8 +1485,8 @@ ggsave("Fig22_Total_Watercraft_Type_Pie_Chart.jpg",p22)
 ### Figure 23 Pie Chart of High-Risk Watercraft Types
 
 ```{r fig23_pie_chart_HR_watercraft_types}
-p23 = dat %>% 
-  filter(High_Risk_AIS_Ind == T) %>% 
+p23 = dat_hr %>% 
+  filter(Year == my.year) %>% 
   rename(`Non-motorized / Hand launched` = Non_Motorized_Counter,
          Simple = Simple_Counter,
          Complex = Complex_Counter,
@@ -883,15 +1519,44 @@ ggsave("Fig23_Highrisk_Watercraft_Type_Pie_Chart.jpg",p23)
 
 ### Figure 24 Mussel-fouled By Month All Years
 ```{r fig24_musselfouled_by_month_all_years}
-p24 = dat_mf %>% 
-  mutate(datformonth = coalesce(raw_timestamp,Start_Time)) %>% 
-  mutate(Month = month(datformonth,label=T,abbr = F)) %>%
-  #One record is missing a date, but I know its from September 2015.
-  mutate(Month = replace_na(Month, month(9,label=T,abbr=F))) %>% 
-  group_by(Year,Month) %>% 
-  summarise(NumberBoats = n()) %>% 
+#If an excel sheet can be found in the Final Report > my.year > GIS Maps and Excel Figures folder, use that. We make this excel sheet automatically below, and it can be updated by hand after its creation.
+
+if(file.exists(paste0("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/",my.year,"/GIS Maps and Excel Figures/Fig24_MusselFouled_byMonth_2017-",my.year,".xlsx"))){
+  mf_time_table = read_excel(paste0("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/",my.year,"/GIS Maps and Excel Figures/Fig24_MusselFouled_byMonth_2017-",my.year,".xlsx"))
+}
+
+#If that file does not yet exist...
+if(!file.exists(paste0("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/",my.year,"/GIS Maps and Excel Figures/Fig24_MusselFouled_byMonth_2017-",my.year,".xlsx"))){
+#Read in the hand-cleaned excel sheet from 2020 report, and add more recent data to it.
+mf_time_table = read_excel("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/2020/GIS Maps and Excel Figures/ExcelFigureData/2019_Fig24_MusselFouled_byMonth_2017-2020.xlsx",sheet = "dat_for_R")
+
+#Add my.year (and any intervening years between 2020 and my.year, if there are any)'s mf data to the excel sheet.
+mf_time_table = mf_time_table %>% 
+  bind_rows(dat_mf %>% 
+    filter(Year %in% 2021:my.year) %>% 
+    group_by(Year,Month) %>% 
+    summarise(Number = n()) %>% 
+    pivot_wider(names_from = Month, values_from = Number) %>% 
+    mutate(Year = 2021:my.year)) %>% 
+  mutate(across(c(April:November), ~ replace_na(.x, 0))) %>% 
+  ungroup()
+
+#Add total back in.
+mf_time_table$Total = rowSums(mf_time_table %>% select(-Year,-Total))
+
+#Save the excel file in my.year's folder.
+write.xlsx(mf_time_table, paste0("I:/SPECIES/Zebra_Quagga_Mussel/Communications/Inspection data reporting/Final report/",my.year,"/GIS Maps and Excel Figures/Fig24_MusselFouled_byMonth_2017-",my.year,".xlsx"))
+}
+
+p24 = mf_time_table %>% 
+  pivot_longer(-Year) %>% 
+  filter(name != "Total") %>% 
+  rename(Month = name) %>% 
+  mutate(NumberBoats = as.numeric(value),
+         Month = factor(Month,levels = c("April","May","June","July","August","September","October","November"))) %>% 
+  mutate(Year = factor(Year, levels = c(2015:my.year))) %>% 
   ggplot() + 
-  geom_col(aes(x = Month,y=NumberBoats,fill=Year),col="black",position=position_dodge2(width = 0.5, preserve = "single")) + 
+  geom_col(aes(x = Month, y=NumberBoats, fill=Year), col="black", position=position_dodge2(width = 0.5, preserve = "single")) + 
   scale_fill_brewer(palette = "Dark2") + 
   theme_classic() + 
   scale_y_continuous(limits = c(0,8), breaks = seq(0,8,1)) + 
@@ -905,7 +1570,7 @@ ggsave("Fig24_Musselfouled_by_Month.jpg",p24)
 
 ### Figure 25 Source Provinces / States for Mussel-fouled Boats
 ```{r fig25_source_province_states_for_musselfouled}
-dat_mf %>% 
+p25 = dat_mf %>% 
   filter(Year == 2021) %>% 
   rename(prev = Previous_Waterbody_1_Province_Or_State) %>% 
   group_by(prev) %>% 
@@ -922,39 +1587,27 @@ dat_mf %>%
   theme_void() + 
   labs(fill = "Destination Region") + 
   theme(legend.position = "none")
+
+p25
+
+ggsave("Fig25_MusselFouled_Source_Regions_Pie_Charts.jpg",p25)
+
 ```
 
 ### Figure 26 Destination Regions of Mussel-fouled Inspections
 
 ```{r fig26_pie_chart_destination_locations_MF_Insp}
-p26 = dat_mf %>% 
-  filter(Year == 2021) %>% 
-  #3 records indicate potential dry storage - need to add this to DestRegion.
-  mutate(DestRegion = replace(DestRegion,
-                              DestRegion == "Unknown",
-                              "Dry Storage/Outside BC")) %>% 
-  group_by(DestRegion) %>% 
-  summarise(NumberBoats = n()) %>% 
-  #Add the FLNRO regions...to do this, for each water body name in the FLNRO lookup table, I sort the FLNRO regions based on their
-#number, low to high (e.g. 1, 2, 3 -> 7), remove the O and P from regions 7,
-#and keep only the first match between a named water body and a region's water body.
-  left_join(flnro_lookup %>% 
-              rename(DestRegion = GNIS_NAME_) %>% 
-              mutate(REGION_G = str_remove(REGION_G,"[A-Z]{1}")) %>% 
-              arrange(DestRegion,REGION_G) %>% 
-              group_by(DestRegion) %>% 
-              slice(1)) %>% 
-#Any holes in this lookup table should be filled with DestRegion values.
-  mutate(REGION_N = case_when(
-         is.na(REGION_N) ~ DestRegion,
-         T ~ REGION_N)) %>% 
-  arrange(desc(DestRegion)) %>% 
-  mutate(lab.ypos = cumsum(NumberBoats) - 0.5*NumberBoats) %>% 
-  ggplot(aes(x = "", y = NumberBoats, 
-           fill = REGION_N)) +
+fig26dat = read_excel(MusselFouledTracker,
+                      sheet = MF_tracker_sheet)
+
+p26 = fig26dat %>% 
+  arrange(desc(Region)) %>% 
+  mutate(lab.ypos = cumsum(Number) - 0.5*Number) %>% 
+  ggplot(aes(x = "", y = Number, 
+           fill = Region)) +
   geom_bar(width = 1, stat = "identity", color = "white") +
   coord_polar("y", start = 0)+
-  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(REGION_N,"\n",NumberBoats)), color = "black",nudge_x=0.2)+
+  geom_text_repel(aes(y = lab.ypos, x = 1.49, label = paste0(Region,"\n",Number)), color = "black",nudge_x=0.2)+
   theme_void() + 
   scale_fill_brewer(palette = "Dark2") + 
   labs(fill = "Destination Region") +
@@ -1002,6 +1655,7 @@ ggsave("Fig28_Musselfouled_Watercraft_Type_Pie_Chart.jpg",p28)
 ```{r fig29_commercially_hauled_boats}
 p29 = dat %>% 
   filter(Commercially_Hauled_Ind == T) %>% 
+  filter(Station != "Scheduled Inspection") %>% 
   group_by(Station) %>% 
   summarise(NumberBoats = n()) %>% 
   arrange(desc(NumberBoats)) %>% 
@@ -1019,10 +1673,56 @@ ggsave("Fig29_Commerically_Hauled_by_Station.jpg",p29)
 
 ```
 
+### Figure 30 
+```{r fig30_CBSA_Notifications}
+cbsa_dat = cbsa_dat %>% 
+  filter(!is.na(Categories)) %>% 
+  mutate(Categories = str_to_upper(Categories)) %>% 
+  mutate(Categories = str_remove_all(Categories, " -")) %>% 
+  mutate(Subtype = str_extract(Categories, "(?<=CBSA ).*")) %>% 
+  mutate(Categories = str_remove_all(Categories, "(?<=CBSA).*")) %>% 
+  mutate(Year = my.year) %>% 
+  mutate(Categories = case_when(
+    Categories %in% c("NEW BOATS","NEW BOAT SHIPMENT") ~ "NEW BOATS",
+    str_detect(Categories, "INVASIVE SPECIES") ~ "ISCBC",
+    T ~ Categories
+  )) %>% 
+  mutate(Subtype = coalesce(Subtype, Categories)) %>% 
+  mutate(Categories = case_when(
+    Categories %in% c("USA","US","US STATE","ID","MT") ~ "USA",
+    Categories %in% c("AB","SK","MB") ~ "PROVINCES",
+    T ~ Categories
+  )) %>% 
+  count(Categories, Subtype, sort = T)
+
+p30 = cbsa_dat %>% 
+  group_by(Categories) %>% 
+  summarise(group_n = sum(n)) %>%
+  ungroup() %>% 
+  arrange(group_n) %>% 
+  mutate(Categories = fct_inorder(Categories)) %>% 
+  ggplot() + 
+  geom_col(aes(group_n, Categories, fill = Categories), col = "black") + 
+  geom_text(aes(group_n/2, Categories, label = group_n), size = 5) +
+  theme_light() +
+  theme(text = element_text(size = 16)) +
+  theme(legend.position = "none") +
+  labs(y = "", x = "Number of Notifications",
+       title = "CBSA Notification Categories",
+       subtitle = my.year)
+
+p30
+
+ggsave("Fig30_Percent_Previous_Knowledge.jpg",p30)
+
+```
+
 ### Figure 32 Previous Knowledge
 
 ```{r fig32_previous_knowledge}
 fig32_dat = dat %>% 
+  filter(!Station %in% c("Scheduled Inspection",
+                         "Other")) %>% 
   group_by(Station, Previous_AIS_Knowledge_Ind) %>%
   summarise(Number = n()) %>% 
   mutate(TotalPerStation = sum(Number)) %>% 
@@ -1081,7 +1781,7 @@ p33 = dat %>%
   mutate(lab.ypos = cumsum(prop) - 0.5*prop) %>% 
   ggplot(aes(x = "", y = prop, 
            fill = Grouper)) +
-  geom_col(width = 1, color = 1) +
+  geom_col(width = 1, color = "white") +
   coord_polar(theta = "y") +
   geom_text_repel(aes(y = lab.ypos, x = 1.15, label = paste0(round(prop,0), "%")),
                    size = 4.5, nudge_x = 1, force_pull = 0.5,force = 1000) +
