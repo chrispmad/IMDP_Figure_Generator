@@ -71,10 +71,6 @@ knitr::opts_knit$set(root.dir = paste0( "I:/SPECIES/Zebra_Quagga_Mussel/Communic
 ## `r print(my.year)` IMDP Final Report Figures
 
 ```{r import_data}
-#Read in the (uncleaned) data with ALL columns.
-# dat_all_cols = read_excel("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/Multiyear data/WatercraftInspectionData_AllYears_PreCleaning.xlsx") %>%
-#   mutate(Year = as.numeric(str_extract(Watercraft_Risk_Assessment_ID,"^[0-9]{4}")))
-
 #Read in data (cleaned). These data do not have any of the "test" records from metabase.
 dat_all = read_excel("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/Multiyear data/WatercraftInspectionData_AllYears_Selected_Columns.xlsx",
                      col_type = "text")
@@ -157,41 +153,6 @@ dat_all$TimeOfInspection = convertToDateTime(dat_all$TimeOfInspection)
 
 dat_all = dat_all %>% 
   mutate(Shift_hours = as.numeric(End_Time - Start_Time)/3600)
-```
-
-```{r raw_timestamp_correction}
-# dat_all$Month = month(dat_all$raw_timestamp, abbr = F, label = T)
-# 
-# #Experimental - for any year where metabase is being used (i.e. 2020 and later), find out if the busiest hour on average for each year/month combo is NOT around noon. If that's the case, subtract 7 hours from the raw timestamp to correct it from UTC to PST timezone.
-# #backup = dat_all
-# 
-# for(each.year in unique(dat_all[dat_all$Year>2019,]$Year)){
-# 
-#   #Subset data for year of focus
-#   dat_zoomed = dat_all %>% filter(Year == each.year)
-# 
-#   #Temporarily remove the year of focus from dat_all
-#   dat_all = dat_all %>% filter(Year != each.year)
-# 
-#   #Find busiest hours for each month. If noon is not among the 4 busiest hours, subtract 7 hours from raw_timestamp for that month. Do for all months.
-#   for(each.month in unique(dat_zoomed$Month)){
-#     #Find the 4 busiest hours per month
-#     busiest_hours = dat_zoomed %>%
-#      dplyr::filter(Month == each.month) %>%
-#      mutate(inspection_hour = hour(raw_timestamp)) %>%
-#      count(inspection_hour) %>%
-#      arrange(desc(n)) %>%
-#      slice(1:4) %>%
-#      select(inspection_hour)
-# 
-#      if(!12 %in% busiest_hours$inspection_hour)
-#        {dat_zoomed$raw_timestamp = dat_zoomed$raw_timestamp - 7*3600
-#    }
-#   }
-#   #Add the year of focus' data back into dat_all, now with corrected raw_timestamp.
-#   dat_all = dat_all %>%
-#     bind_rows(dat_zoomed)
-# }
 ```
 
 ```{r correct_negative_shift_length_data}
@@ -397,74 +358,6 @@ dat_mf = dat_all %>% filter(MusselsFound_Ind == T)
 dat_hr = dat_all %>% filter(High_Risk_AIS_Ind == T) %>% 
   filter(Clean_Drain_Dry_After_Inspection_Ind == F | Year < 2020)
 
-#Quick aside: Data Request on 2022-01-19:
-# datrequest_hr = dat_hr %>%
-#   group_by(Year) %>%
-#   summarise(Total = n()) %>%
-#   left_join(dat_hr %>%
-#             filter(Simple_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(Simple = n())) %>%
-#   left_join(dat_hr %>%
-#             filter(Complex_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(Complex = n())) %>%
-#   left_join(dat_hr %>%
-#             filter(Very_Complex_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(VeryComplex = n())) %>%
-#   left_join(dat_hr %>%
-#             filter(Non_Motorized_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(NonMotorized = n())) %>%
-#   mutate(across(-Year, ~replace_na(.x, 0)))
-# 
-# datrequest_mf = dat_mf %>%
-#   group_by(Year) %>%
-#   summarise(Total = n()) %>%
-#   left_join(dat_mf %>%
-#             filter(Simple_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(Simple = n())) %>%
-#   left_join(dat_mf %>%
-#             filter(Complex_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(Complex = n())) %>%
-#   left_join(dat_mf %>%
-#             filter(Very_Complex_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(VeryComplex = n())) %>%
-#   left_join(dat_mf %>%
-#             filter(Non_Motorized_Counter != "0") %>%
-#             group_by(Year) %>%
-#             summarise(NonMotorized = n())) %>%
-#   mutate(across(-Year, ~replace_na(.x, 0)))
-# 
-# datrequest = createWorkbook()
-# addWorksheet(wb = datrequest, sheetName = "HR")
-# addWorksheet(wb = datrequest, sheetName = "MF")
-# 
-# writeDataTable(wb = datrequest, sheet = "HR",x = datrequest_hr, withFilter = T)
-# 
-# writeDataTable(wb = datrequest, sheet = "MF",x = datrequest_mf, withFilter = T)
-# 
-# saveWorkbook(datrequest,
-#              paste0("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/DataRequest_HR_and_MF_boat_types_2022_02_07.xlsx"),overwrite = T)
-
-#Double check that they are the same HR for 2021.
-# hr_filtered_2021 = read.xlsx("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/2021 data/mussel summary export 2021-10-25_end of season.xlsx", sheet = "High risk filter")
-# 
-# uniqids = unique(hr_filtered_2021$Watercraft.Risk.Assessment.ID)
-# 
-# dat_hr %>%
-#   filter(Year == 2021) %>%
-#   mutate(ids_2021 = as.numeric(str_remove(Watercraft_Risk_Assessment_ID, "2021-"))) %>%
-#   filter(ids_2021 %in% all_of(uniqids))
-# 
-# uniqids[!uniqids %in% all_of(dat_hr %>%
-#   filter(Year == 2021) %>%
-#   mutate(ids_2021 = as.numeric(str_remove(Watercraft_Risk_Assessment_ID, "2021-"))) %>% pull(ids_2021))]
-
 dat = dat_all %>% filter(Year == my.year)
 ```
 
@@ -519,33 +412,10 @@ dat_hr = dat_hr %>%
  #select(Watercraft_Risk_Assessment_ID,DestRegion))
 ```
 
-```{r temporary_section_write_out_stations_with_few_insp}
-# few_insp_workbook = createWorkbook()
-# addWorksheet(wb = few_insp_workbook, sheetName = "PentRoving")
-# addWorksheet(wb = few_insp_workbook, sheetName = "Kaleden")
-# addWorksheet(wb = few_insp_workbook, sheetName = "Other")
-# 
-# writeDataTable(wb = few_insp_workbook, sheet = "PentRoving", x = dat %>% filter(Station == "Penticton Roving"),withFilter = T)
-# 
-# writeDataTable(wb = few_insp_workbook, sheet = "Kaleden",x = dat %>% filter(Station == "Kaleden"),withFilter = T)
-# 
-# writeDataTable(wb = few_insp_workbook, sheet = "Other",x = dat %>% filter(Station == "Other"),withFilter = T)
-# 
-# saveWorkbook(few_insp_workbook, 
-#              paste0("I:/SPECIES/Zebra_Quagga_Mussel/Operations/Watercraft Inspection Data/2021 data/Transient stations with few inspections.xlsx"),overwrite = T)
-```
-
 ```{r reduce dat_all, dat}
 #Set aside four stations that Martina asked for a single excel sheet for.
 dat_rovers = dat %>% filter(Station %in% stations.to.put.aside)
 dat_all_rovers = dat_all %>% filter(Station %in% stations.to.put.aside)
-
-#Remove any stations that were flagged at the beginning of this script to be excluded from excel-type figures.
-#dat = dat %>% filter(Station %in% stations.to.include)
-#dat_all = dat_all %>% filter(Station %in% stations.to.include)
-
-#Get rid of any rows that have exactly the same raw timestamp. This was chosen as the best method to get rid of duplicate records which showed up in Metabase because of the app glitching and sending multiple entries for the same inspection. BUT if there are mussel fouled boats, keep all of those.
-# dat_all = dat_all %>% filter(!duplicated(raw_timestamp)) 
 ```
 
 ```{r}
@@ -610,85 +480,6 @@ p3 = dat %>%
 p3
 
 ggsave("Fig3_EncounterFrequency_HR.jpg",p3)
-```
-
-
-```{r figures_for_StoryMaps_2021, fig.width=8, fig.height = 4}
-# OverallFindings = tibble(Year = c(2015:my.year),
-#        `Total Watercraft Inspected` = c(4350,24500,35000,40700,52000,29900,
-#                                     as.numeric(dat %>% summarise(n()) + dat_rovers %>% summarise(n()))),
-#        `High-Risk Inspections` = c(70,685,2071,1652,1290,158,
-#                                as.numeric(dat_hr %>% filter(Year == my.year) %>% summarise(n()))),
-#        `Mussel-Fouled Boats` = c(15,17,25,25,22,16,
-#                              as.numeric(dat_mf %>% filter(Year == my.year) %>% summarise(n())))) %>% 
-#   pivot_longer(-Year) %>% 
-#   mutate(name = factor(name, levels = c("Total Watercraft Inspected",
-#                                         "High-Risk Inspections",
-#                                         "Mussel-Fouled Boats")))
-# 
-# OverallFindingsPlot = plotly::ggplotly(
-#   ggplot() + 
-#   geom_col(data = OverallFindings %>% 
-#              rename(`Number of Inspection` = value,
-#                     `Inspection Type` = name), 
-#            aes(x = Year, 
-#                y = `Number of Inspection`, 
-#                fill = `Inspection Type`)) +
-#   facet_wrap(~ `Inspection Type`, scales = "free", nrow = 1, ncol = 3) + 
-#   # geom_text(data = OverallFindings %>% 
-#   #             mutate(value_lab = case_when(
-#   #               value >= 1000 ~ paste0("~",round(value, -3)),
-#   #               T ~ as.character(value))) %>% 
-#   #             mutate(value_lab = str_replace(value_lab, "000$", "K")),
-#   #           aes(x = Year, y = value/2,
-#   #               label = value_lab),
-#   #           size = 3) +
-#   theme_classic() + 
-#   scale_x_continuous(breaks = 2015:my.year) +
-#   scale_fill_brewer(palette = "Dark2") +
-#   theme(legend.position = "none",
-#         axis.text.x = element_text(angle = 45, vjust = .5)) + 
-#   labs(fill = "Inspection Type", y = "Number of Inspections")
-#   )
-
-#ggsave("C:/Users/CMADSEN/Downloads/LocalRWork/output/OverallFindingsPlot_MusselStoryMap.jpg",OverallFindingsPlot, height = 4, width = 8)
-```
-
-
-```{r fig3c_total_boats_by_station_excluded_stations}
-### Figure 3b. Low-risk and High-risk Boats by Station for only 4 Excluded Stations
-#Scheduled Inspections, Boat Launch - Okanangan, Penticton Roving - Hwy 33, and #Penticton Roving - Inspection Event.
-
-# p3b = dat_rovers %>% 
-#   filter(High_Risk_AIS_Ind == F) %>% 
-#   group_by(Station) %>% 
-#   summarise(LowRisk = n()) %>% 
-#   left_join(dat_hr %>% 
-#               filter(Year == my.year) %>% 
-#               group_by(Station) %>% 
-#               summarise(HighRisk = n())
-#             ) %>% 
-#   #For any stations with 0 HR inspections, replace NA with 0.
-#   mutate(HighRisk = replace_na(HighRisk, 0)) %>% 
-#   mutate(Station = factor(Station)) %>% 
-#   add_row(Station = "Penticton Roving - Inspection Event",
-#           LowRisk = 0, HighRisk = 0) %>% 
-#   rename(`Low-Risk Inspections` = LowRisk,
-#          `High-Risk Inspections` = HighRisk) %>% 
-#   pivot_longer(cols = c(`Low-Risk Inspections`,`High-Risk Inspections`)) %>% 
-#   ggplot() + 
-#   geom_col(aes(x=Station,y=value,fill=name), width = 0.40, position = position_dodge()) +
-#   theme_classic() +
-#   # geom_text(aes(x=the.month,y=TotalEffort+max(TotalEffort)*0.05,
-#   #               label=round(TotalEffort,0))) +
-#   scale_fill_manual(values = c("Low-Risk Inspections" = "#5f6a6f",
-#                                "High-Risk Inspections" = "red")) +
-#   labs(x = "", y = "Number of Inspections", fill = "Inspection Type") +
-#   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
-# 
-# p3b
-# 
-# ggsave("Fig3b_Low_and_High_Risk_for_Excluded_Stations.jpg",p3b)
 ```
 
 ### Figure 3.x Total Inspections by Station
