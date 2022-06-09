@@ -12,6 +12,7 @@ pacman::p_load(
 readxl,
 ggpubr,
 ggrepel,
+ggExtra,
 tidyverse,
 sf,
 RColorBrewer,
@@ -37,6 +38,7 @@ stations.to.include = c("Golden","Radium","Olsen","Yahk",
                         "Keremeos","Greenwood","Dawson Creek","Kaleden")
 
 stations.to.put.aside = c("Scheduled Inspection","Boat Launch - Okanagan",
+                          "Okanagan",
                           "Penticton Roving - Hwy 33", 
                           "Penticton Roving - Inspection Event")
 
@@ -421,7 +423,7 @@ dat_all_rovers = dat_all %>% filter(Station %in% stations.to.put.aside)
 ```{r}
 #Establish colour scheme for roving stations.
 data.frame(unique(dat$Station))
-rovers = data.frame(Station = c("Hwy 97C","Keremeos","Greenwood","Kaleden"),
+rovers = data.frame(Station = c("Hwy 97c","Keremeos","Greenwood","Kaleden"),
                     StationType = "Roving")
 
 station_types = bind_rows(rovers,
@@ -432,13 +434,20 @@ station_types = bind_rows(rovers,
                        pull(Station),
                      StationType = "Permanent"))
 rm(rovers)
+
+my.grey = "#5f6a6f"
+```
+
+```{r}
+#Make one more vector of stations that we want to drop in the figures. These are roving stations.
+rovers_to_drop = c("Scheduled Inspection","Other","Okanagan","Penticton Roving")
 ```
 
 ### Figure 3 Total Boats by Station
 
 ```{r fig3_total_boats_by_station}
-p3 = dat %>% 
-  filter(!Station %in% c("Scheduled Inspection","Other","Okanagan","Penticton Roving")) %>% 
+fig3_data = dat %>% 
+  filter(!Station %in% rovers_to_drop) %>% 
   group_by(Station) %>% 
   summarise(NumberInsp = n()) %>% 
   left_join(dat_hr %>% 
@@ -464,16 +473,26 @@ p3 = dat %>%
   mutate(Station = factor(Station)) %>% 
   mutate(Station = fct_inorder(Station)) %>% 
   left_join(station_types) %>% 
-  ggplot() + 
-  geom_col(aes(x=Station,y=EncounterFreq, fill = StationType), width = 0.40) +
-  geom_line(aes(x=Station,y=PercentHR,group=1),col="red",size=2) +
+  #pivot_longer(cols = c("NumberInsp","NumberHighRiskInsp",""))
+  mutate(StationLabel = ifelse(StationType == "Roving", paste0(Station,"*"),Station)) %>% 
+  mutate(StationLabel = fct_inorder(StationLabel)) %>% 
+  mutate(col.width = as.numeric(cut(log10(NumberInsp),3))) %>% 
+  mutate(col.width = replace(col.width, col.width == 3, 4))
+  
+p3 = fig3_data %>% 
+  ggplot() +
+  geom_col(aes(x=StationLabel, y=EncounterFreq), fill = my.grey, width = 0.40) +
+  geom_point(aes(x = StationLabel, y = EncounterFreq/2, size = col.width),alpha = 0.5) +
+  geom_line(aes(x=StationLabel,y=PercentHR,group=1),col="red",size=2) +
   scale_y_continuous(name = "Encounter Frequency",
                      sec.axis = sec_axis(~., name = "% High Risk",
                                          breaks = seq(0,8,2))) +
-  # geom_text(aes(x=Station,y=EncounterFreq+max(EncounterFreq)*0.05,
-  #               label=round(EncounterFreq,0))) +
   theme_classic() +
-  labs(x = "", y = "Encounter Frequency") +
+  scale_size_continuous(breaks = c(1,2,4),
+                        labels = c("10 - 200",
+                                   "200 - 1k",
+                                   "1k- 10k")) +
+  labs(x = "", y = "Encounter Frequency", size = "Total Inspections") +
   scale_fill_brewer(palette = "Dark2") +
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
 
@@ -516,16 +535,19 @@ ggsave("Fig3x_TotalInspections_2019_to_2021_All_Stations.jpg",p3.x)
 
 ```{r fig4_total_number_jurisdictions}
 p4 = dat %>%
-  filter(!Station %in% c("Scheduled Inspection","Other","Penticton Roving")) %>% 
+  filter(!Station %in% rovers_to_drop) %>% 
   group_by(Station,Previous_Waterbody_1_Province_Or_State) %>% 
   summarise(Different_Sources = n()) %>% 
   summarise(TotalSources = n()) %>% 
   arrange(desc(TotalSources)) %>% 
   left_join(station_types) %>% 
   mutate(Station = factor(Station,levels = .$Station)) %>% 
+  mutate(StationLabel = paste0(Station,
+                         ifelse(StationType == "Roving", "*", ""))) %>% 
+  mutate(StationLabel = fct_reorder(StationLabel, -TotalSources)) %>% 
   ggplot() + 
-  geom_col(aes(x=Station,y=TotalSources, fill = StationType),width = 0.40) +
-  geom_text(aes(x=Station,y=TotalSources+0.05*max(TotalSources),label=TotalSources)) +
+  geom_col(aes(x=StationLabel,y=TotalSources), fill = my.grey, width = 0.40) +
+  geom_text(aes(x=StationLabel,y=TotalSources+0.05*max(TotalSources),label=TotalSources)) +
   labs(y = "Number of Origin Jurisdictions") + 
   theme_classic() + 
   scale_fill_brewer(palette = "Dark2") +
@@ -545,7 +567,7 @@ p5 = ggarrange(dat %>%
   group_by(the.month) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
-  geom_col(aes(x=the.month,y=Number_Insp),fill = "#5f6a6f",width = 0.40) +
+  geom_col(aes(x=the.month,y=Number_Insp),fill = my.grey,width = 0.40) +
   geom_text(aes(x=the.month,y=Number_Insp+max(Number_Insp)*0.05,
                 label=round(Number_Insp,0))) +
   theme_classic() +
@@ -561,7 +583,7 @@ p5 = ggarrange(dat %>%
   filter(Shift_hours > 0) %>% 
   summarise(TotalEffort = sum(Shift_hours)) %>% 
   ggplot() + 
-  geom_col(aes(x=the.month,y=TotalEffort),fill = "#5f6a6f",width = 0.40) +
+  geom_col(aes(x=the.month,y=TotalEffort),fill = my.grey,width = 0.40) +
   geom_text(aes(x=the.month,y=TotalEffort+max(TotalEffort)*0.05,
                 label=round(TotalEffort,0))) +
   theme_classic() +
@@ -580,6 +602,7 @@ ggsave("Fig5_NumberInspections_and_TotalEffort_month.jpg",p5)
 p6 = dat %>% 
   mutate(the.month = month(TimeOfInspection,label=T,abbr=F)) %>% 
   mutate(the.day = day(TimeOfInspection)) %>% 
+  filter(the.month != "December") %>% 
   #Calculate the number of inspections for each month
   group_by(the.month,the.day) %>% 
   summarise(Number_Insp = n()) %>% 
@@ -605,7 +628,7 @@ p6 = dat %>%
     T ~ StandardError
   )) %>% 
   ggplot() + 
-  geom_col(aes(x=the.month,y=EncounterFreq),fill = "#5f6a6f",width = 0.40) +
+  geom_col(aes(x=the.month,y=EncounterFreq),fill = my.grey,width = 0.40) +
   geom_errorbar(aes(x=the.month,
                   ymin = EncounterFreq-StandardError,
                   ymax = EncounterFreq+StandardError),width = 0.15) +
@@ -630,7 +653,7 @@ p7 = ggarrange(dat %>%
   group_by(the.day) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
-  geom_col(aes(x=the.day,y=Number_Insp),fill = "#5f6a6f",width = 0.40) +
+  geom_col(aes(x=the.day,y=Number_Insp),fill = my.grey,width = 0.40) +
   geom_text(aes(x=the.day,y=Number_Insp+max(Number_Insp)*0.05,
                 label=round(Number_Insp,0))) +
   theme_classic() +
@@ -645,7 +668,7 @@ p7 = ggarrange(dat %>%
   filter(Shift_hours > 0) %>% 
   summarise(TotalEffort = sum(Shift_hours)) %>% 
   ggplot() + 
-  geom_col(aes(x=the.day,y=TotalEffort),fill = "#5f6a6f",width = 0.40) +
+  geom_col(aes(x=the.day,y=TotalEffort),fill = my.grey,width = 0.40) +
   geom_text(aes(x=the.day,y=TotalEffort+max(TotalEffort)*0.05,
                 label=round(TotalEffort,0))) +
   theme_classic() +
@@ -688,7 +711,7 @@ p8 = dat %>%
   select(the.day,EncounterFreq,StandardError) %>% 
   distinct() %>% 
   ggplot() + 
-  geom_col(aes(x=the.day,y=EncounterFreq),fill = "#5f6a6f",width = 0.40) +
+  geom_col(aes(x=the.day,y=EncounterFreq),fill = my.grey,width = 0.40) +
   geom_errorbar(aes(x=the.day,
                   ymin = EncounterFreq-StandardError,
                   ymax = EncounterFreq+StandardError),width = 0.15) +
@@ -712,7 +735,7 @@ p9 = dat %>%
   group_by(the.hour) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
-  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = my.grey,
            width = 0.40) +
   geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
                 label=round(Number_Insp,0))) +
@@ -734,7 +757,7 @@ p9.2 = dat %>%
   group_by(the.hour) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
-  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = my.grey,
            width = 0.40) +
   geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
                 label=round(Number_Insp,0))) +
@@ -756,7 +779,7 @@ p9.3 = dat %>%
   group_by(the.hour) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
-  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = my.grey,
            width = 0.40) +
   geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
                 label=round(Number_Insp,0))) +
@@ -780,7 +803,7 @@ p9.4 = dat %>%
   group_by(the.hour) %>% 
   summarise(Number_Insp = n()) %>% 
   ggplot() + 
-  geom_col(aes(x=the.hour,y=Number_Insp),fill = "#5f6a6f",
+  geom_col(aes(x=the.hour,y=Number_Insp),fill = my.grey,
            width = 0.40) +
   geom_text(aes(x=the.hour,y=Number_Insp+max(Number_Insp)*0.05,
                 label=round(Number_Insp,0))) +
@@ -807,7 +830,7 @@ p11 = dat %>%
   mutate(Destination_Waterbody_1_Name = factor(Destination_Waterbody_1_Name,levels = .$Destination_Waterbody_1_Name)) %>%
   ggplot() + 
   geom_col(aes(x=Destination_Waterbody_1_Name,
-               y=Percent),fill = "#5f6a6f", width = 0.40) +
+               y=Percent),fill = my.grey, width = 0.40) +
   geom_text(aes(x=Destination_Waterbody_1_Name,
                 y=Percent+max(Percent)*0.05,
                label=paste0(round(Percent,1),"%"))) +
@@ -824,8 +847,7 @@ ggsave("Fig11_DestinationWaterbody_Percent_Inspections.jpg",p11)
 
 ```{r fig12_percent_compliance_by_station}
 p12 = dat %>% 
-  filter(!Station %in% c("Scheduled Inspection",
-                         "Other","Penticton Roving")) %>% 
+  filter(!Station %in% rovers_to_drop) %>% 
   group_by(Station,Shift_ID) %>% 
   summarise(NumberInsp = n()) %>% 
   #Add number of non-motorized blow-bys per unique station / shift combo.
@@ -847,21 +869,22 @@ p12 = dat %>%
   group_by(Station) %>% 
   summarise(PercentCompliance = 100*NumberInsp/(NumberInsp + Non_Motorized_Blow_Bys_Counter + Motorized_Blow_Bys_Counter)) %>% 
   arrange(desc(PercentCompliance)) %>% 
+  #Add station type...
   left_join(station_types) %>% 
-  mutate(Station = factor(Station, levels = .$Station)) %>% 
+  mutate(StationLabel = paste0(Station,
+                         ifelse(StationType == "Roving", "*", ""))) %>% 
+  mutate(StationLabel = fct_reorder(StationLabel, -PercentCompliance)) %>% 
   ggplot() + 
-  geom_col(aes(x=Station,
-               y=PercentCompliance, fill = StationType), width = 0.40) +
-  geom_text(aes(x=Station,
+  geom_col(aes(x=StationLabel,
+               y=PercentCompliance), fill = my.grey, width = 0.40) +
+  geom_text(aes(x=StationLabel,
                 y=PercentCompliance+max(PercentCompliance)*0.05,
                label=paste0(round(PercentCompliance,0),"%"))) +
   theme_classic() +
   labs(x = "",y = "Percent Compliance") + 
   scale_y_continuous(breaks = seq(0,100,10), labels = paste0(seq(0,100,10),"%")) + 
-  theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1)) + 
-  scale_fill_brewer(palette = "Dark2")
+  theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
 
-  
 p12
 
 ggsave("Fig12_PercentCompliance_Station.jpg",p12)
@@ -870,11 +893,7 @@ ggsave("Fig12_PercentCompliance_Station.jpg",p12)
 ### Figure 13 Noncompliant Watercraft Breakdown
 ```{r fig13_noncompliant_breakdown}
 p13 = dat %>% 
-  filter(!Station %in% c("Scheduled Inspection",
-                         "Penticton Roving",
-                         "Okanagan",
-                         "Osoyoos",
-                         "Other")) %>% 
+  filter(!Station %in% c(rovers_to_drop,"Osoyoos")) %>% 
   group_by(Station,Shift_ID) %>% 
   mutate(nonm = as.numeric(Non_Motorized_Blow_Bys_Counter)) %>% 
   select(Station,Shift_ID,nonm) %>% 
@@ -894,10 +913,15 @@ p13 = dat %>%
   summarise(`Non-Motorized` = 100*nonm/Total_Blowbys,
             Motorized = 100*m/Total_Blowbys) %>% 
   arrange(desc(`Non-Motorized`)) %>% 
-  mutate(Station = factor(Station, levels = .$Station)) %>% 
-  pivot_longer(cols = -Station) %>% 
+  #mutate(Station = factor(Station, levels = .$Station)) %>% 
+  pivot_longer(cols = -Station) %>%
+  arrange(desc(value),Station) %>% 
+  left_join(station_types) %>% 
+  mutate(StationLabel = paste0(Station,
+                         ifelse(StationType == "Roving", "*", ""))) %>% 
+  mutate(StationLabel = fct_inorder(StationLabel)) %>%
   ggplot() + 
-  geom_col(aes(x=Station,
+  geom_col(aes(x=StationLabel,
                y=value,
                fill = name),
            col = "black",
@@ -905,12 +929,11 @@ p13 = dat %>%
            position = "stack") +
   theme_classic() +
   labs(x = "",y = "Percent Blow-bys", fill = "") + 
-  scale_fill_manual(values = c("Non-Motorized" = "#5f6a6f",
+  scale_fill_manual(values = c("Non-Motorized" = my.grey,
                                "Motorized" = "grey")) +
   scale_y_continuous(breaks = seq(0,100,10), labels = paste0(seq(0,100,10),"%")) +
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
 
-  
 p13 
 
 ggsave("Fig13_Percent_Blowbys_Station.jpg",p13)
@@ -933,11 +956,12 @@ p14 = dat %>%
   mutate(PercPrevInsp = 100*PrevInspected/TotalInsp) %>% 
   arrange(desc(PercPrevInsp)) %>% 
   left_join(station_types) %>% 
-  mutate(Station = factor(Station, levels = .$Station)) %>% 
+  mutate(StationLabel = ifelse(StationType == "Roving",paste0(Station,"*"),Station)) %>% 
+  mutate(StationLabel = fct_inorder(StationLabel)) %>% 
   ggplot() + 
-  geom_col(aes(x=Station,
-               y=PercPrevInsp, fill = StationType), width = 0.40) +
-  geom_text(aes(x=Station,
+  geom_col(aes(x=StationLabel,
+               y=PercPrevInsp), fill = my.grey, width = 0.40) +
+  geom_text(aes(x=StationLabel,
                 y=PercPrevInsp+max(PercPrevInsp)*0.1,
                label=paste0(round(PercPrevInsp,0),"%"))) +
   theme_classic() +
@@ -959,8 +983,7 @@ ggsave("Fig14_Percent_Intercepted_with_Prev_Insp.jpg",p14)
 ```{r fig15_prev_insp_watercraft_insp_time}
 #Remove Penticton Roving
 p15 = dat %>% 
-  filter(!Station %in% c("Scheduled Inspection",
-                         "Other","Penticton Roving")) %>% 
+  filter(!Station %in% rovers_to_drop) %>% 
   ungroup() %>% 
   filter(Previous_Inspection_Ind == T) %>% 
   filter(!is.na(Previous_Inspection_Days_Count)) %>% 
@@ -985,8 +1008,11 @@ group_by(Station, Timeperiod_name) %>%
                                              "> 1 Year"))) %>% 
   arrange(Station,Timeperiod_name) %>% 
   select(Station,Timeperiod_name,PercInsp) %>% 
+  left_join(station_types) %>% 
+  mutate(StationLabel = ifelse(StationType == "Roving",paste0(Station,"*"),Station)) %>% 
+  mutate(StationLabel = fct_inorder(StationLabel)) %>% 
   ggplot() +
-  geom_col(aes(x=Station,
+  geom_col(aes(x=StationLabel,
                y=PercInsp,
                fill = Timeperiod_name),
            width = 0.40,
@@ -999,7 +1025,6 @@ group_by(Station, Timeperiod_name) %>%
                                "> 1 Year" = "#2986cc")) +
   scale_y_continuous(breaks = seq(0,100,10), labels = paste0(seq(0,100,10),"%")) + 
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
-
 
 p15 
 
@@ -1467,7 +1492,8 @@ ggsave("Fig28_Musselfouled_Watercraft_Type_Pie_Chart.jpg",p28)
 
 ```{r fig29_commercially_hauled_boats}
 p29 = dat %>% 
-  filter(Commercially_Hauled_Ind == T) %>% 
+  filter(Commercially_Hauled_Ind == T,
+         Station != "Hwy 97c") %>% 
   filter(!Station %in% c("Scheduled Inspection","Penticton Roving")) %>% 
   group_by(Station) %>% 
   summarise(NumberBoats = n()) %>% 
@@ -1475,7 +1501,7 @@ p29 = dat %>%
   left_join(station_types) %>% 
   mutate(Station = factor(Station, levels = .$Station)) %>% 
   ggplot() + 
-  geom_col(aes(x=Station,y=NumberBoats),fill = "#5f6a6f", width = 0.40) +
+  geom_col(aes(x=Station,y=NumberBoats),fill = my.grey, width = 0.40) +
   geom_text(aes(x=Station,y=NumberBoats+0.05*max(NumberBoats),label=NumberBoats)) +
   labs(y = "Commercially Hauled Boats") + 
   theme_classic() + 
@@ -1536,8 +1562,7 @@ ggsave("Fig30_Percent_Previous_Knowledge.jpg",p30)
 ```{r fig32_previous_knowledge}
 #Remove Penticton Roving
 fig32_dat = dat %>% 
-  filter(!Station %in% c("Scheduled Inspection",
-                         "Other","Penticton Roving")) %>% 
+  filter(!Station %in% rovers_to_drop) %>% 
   group_by(Station, Previous_AIS_Knowledge_Ind) %>%
   summarise(Number = n()) %>% 
   mutate(TotalPerStation = sum(Number)) %>% 
@@ -1549,33 +1574,29 @@ fig32_dat = dat %>%
   ungroup() %>% 
   filter(Previous_AIS_Knowledge_Ind == T) %>% 
   left_join(station_types) %>% 
-  mutate(Station = factor(Station, levels = .$Station)) %>% 
+  left_join(station_types) %>% 
+  mutate(StationLabel = ifelse(StationType == "Roving",paste0(Station,"*"),Station)) %>% 
+  mutate(StationLabel = fct_inorder(StationLabel)) %>% 
   ungroup() %>% 
   mutate(prop = 100*Number/TotalPerStation) %>% 
   mutate(StationType_T = paste0(StationType, Previous_AIS_Knowledge_Ind))
   
+#Add in dummys for FALSE of Previous_AIS_Knowledge_Ind to make backdrop of plot.
+fig32_dat = fig32_dat %>% 
+  mutate(prop_queda = 100-prop) %>% 
+  pivot_longer(cols = c(prop, prop_queda), names_to = "Prop_type",values_to = "prop") %>% 
+  mutate(Previous_AIS_Knowledge_Ind = replace(Previous_AIS_Knowledge_Ind, Prop_type == "prop_queda", "FALSE")) %>% arrange(desc(Previous_AIS_Knowledge_Ind), Station)
+
 p32 = ggplot() + 
-  geom_col(data = fig32_dat %>% mutate(prop = 100),
-           aes(x=Station,y=prop,fill = StationType),
+  geom_col(data = fig32_dat,
+           aes(x=StationLabel,y=prop,fill = Previous_AIS_Knowledge_Ind),
            col = "black", width = 0.4) + 
-  #scale_fill_brewer(palette = "Set2") + 
-  geom_col(data = fig32_dat, aes(x=Station,y=prop, fill = StationType_T),
-           col="black",width = 0.40) +
   labs(y = "Percent Previous Knowledge",fill = "") + 
-  theme_classic() + 
-  scale_fill_manual(breaks = c("PermanentTRUE","RovingTRUE","Permanent","Roving"),
-                    values = c("Permanent" = "#7BD891",
-                               "PermanentTRUE" = "#23AD23",
-                               "Roving" = "#D87BC2",
-                               "RovingTRUE" = "#AD23AD"),
-                    labels = c("Permanent - Yes",
-                               "Roving - Yes",
-                               "Permanent - No",
-                               "Roving - No")) +
-  # scale_fill_manual(breaks = c("FALSE","TRUE"),
-  #                   values = c("TRUE" = RColorBrewer::brewer.pal(3,"Dark2")[1],
-  #                              "FALSE" = RColorBrewer::brewer.pal(3,"Dark2")[2]),
-  #                   labels = c("Yes","No")) +
+  theme_classic() +
+  scale_fill_manual(breaks = c("TRUE","FALSE"),
+                    values = c("TRUE" = my.grey,
+                               "FALSE" = "grey"),
+                    labels = c("Yes","No")) +
   theme(axis.text.x = element_text(angle = 45,vjust=1,hjust=1))
   
 p32
